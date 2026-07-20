@@ -7,19 +7,20 @@
 
 ## Active work
 
-`bug/translation-mode-editor` branch has this session's stabilization fixes complete
-(Translation Mode editor + custom-field Setup navigation), pending real-org
-verification before merge to `main`. `feature/keyboard-editing-shortcuts` (PHASE 17)
-already merged to `main` this session. No Epic currently open.
+Nothing in progress. `bug/translation-mode-editor` (Translation Mode editor fix +
+custom-field Setup navigation fix) and `feature/keyboard-editing-shortcuts` (PHASE 17)
+are both merged to `main` via PR #1 and the earlier fast-forward respectively. No Epic
+currently open.
 
 ## Git workflow (established this session)
 
 `main` is kept stable; work happens on `feature/`/`bug/`/`refactor/` branches per
-Epic/fix/refactor, merged back (fast-forward where possible) once real-org-verified.
-Branch naming, commit, and PR conventions are documented in `WORKFLOW.md`'s "Git
-workflow" section; a PR description template lives at
-`.github/PULL_REQUEST_TEMPLATE.md`. The repo had no version control before 2026-07-20 —
-the first commit on `main` is that pre-git snapshot.
+Epic/fix/refactor, merged back once real-org-verified — PR #1 (this session's
+stabilization fixes) is the first PR merged under this workflow, at
+https://github.com/ManuelRP15/SalesLens. Branch naming, commit, and PR conventions are
+documented in `WORKFLOW.md`'s "Git workflow" section; a PR description template lives
+at `.github/PULL_REQUEST_TEMPLATE.md`. The repo had no version control before
+2026-07-20 — the first commit on `main` is that pre-git snapshot.
 
 ## What just happened (most recent session — stabilization)
 
@@ -85,8 +86,10 @@ concurrency, Inspection Mode) — see `DECISIONS.md #41–#43`.
 
 ## Immediate next step
 
-Real-org-test `bug/translation-mode-editor` (both fixes), then merge to `main`. After
-that, next candidates (see `ROADMAP.md`'s status table): PHASE 16 (Workspace/package.xml
-Builder, **Muy Alta** priority, large — needs its own dedicated session(s), not a quick
-add-on), the rest of PHASE 17 (arrow-key navigation, blocked on PHASE 18's match list),
-PHASE 18/19 (Translation Navigator, Hover History/Favorites).
+Both merged fixes (Translation Mode editor, custom-field Setup nav) still need an
+actual real-org click to CONFIRM they work — merging isn't the same as verifying, see
+"Known gaps" above. Once confirmed, next candidates (see `ROADMAP.md`'s status table):
+PHASE 16 (Workspace/package.xml Builder, **Muy Alta** priority, large — needs its own
+dedicated session(s), not a quick add-on), the rest of PHASE 17 (arrow-key navigation,
+blocked on PHASE 18's match list), PHASE 18/19 (Translation Navigator, Hover
+History/Favorites).
