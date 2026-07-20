@@ -40,12 +40,21 @@ product, not just a feature:
 3. The tooltip mounts in a **closed** Shadow DOM.
 4. `resolveText` NEVER returns more than one candidate — one answer, or silence
    ("Unknown origin"), never a ranked shortlist. See `DECISIONS.md #28`.
-5. Every Metadata API / SOAP call degrades gracefully (never throws to its caller) — one
-   missing permission or unavailable feature can't break unrelated metadata types.
+5. Every Metadata API / SOAP call on the **read** path degrades gracefully (never
+   throws to its caller) — one missing permission or unavailable feature can't break
+   unrelated metadata types. **Write paths are the deliberate exception** (Custom Label
+   saves, and PHASE 6b's `deploy()`-based saves for the other 8 editable types) — a
+   save the user explicitly asked for THROWS on failure so the error reaches them,
+   instead of silently vanishing; `background/index.ts`'s `saveTranslation()` is the
+   one place that catches it and turns it into a user-facing message.
 6. Zero false positives beats coverage. A wrong guess is worse than no answer.
-7. Editing is scoped to Custom Labels only (see `DECISIONS.md #41`) — don't add an edit
-   affordance for any other `LabelType` without first building the Metadata API
-   `deploy()` pipeline that doesn't exist yet.
+7. Editing is scoped to `isEditableLabelType()`'s set (`types.ts`) — 9 of 13
+   `LabelType`s (see `DECISIONS.md #41`, `#53`). `ObjectLabel`/`RelatedList` are
+   deferred (their target, `<caseValues>`, needs safe multi-grammatical-case handling
+   first); `StandardButton`/`StandardTab` are **permanently** non-editable — they're
+   Salesforce's own platform-controlled translations, not admin-authored content, so
+   there's nothing to write back to. Don't add an edit affordance for any type outside
+   this set without a real write path backing it.
 8. Update `docs/DECISIONS.md` and `docs/CURRENT_STATE.md` **in the same turn** a
    decision is made or a session ends — not "later," not "if there's time."
 

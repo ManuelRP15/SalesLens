@@ -3,93 +3,87 @@
 *Read this first, every session, before anything else — it's short on purpose.*
 *Update it last, every session, before ending — see `WORKFLOW.md` for the exact steps.*
 
-**Last updated:** 2026-07-20
+**Last updated:** 2026-07-21
 
 ## Active work
 
-Nothing in progress. `bug/translation-mode-editor` (Translation Mode editor fix +
-custom-field Setup navigation fix) and `feature/keyboard-editing-shortcuts` (PHASE 17)
-are both merged to `main` via PR #1 and the earlier fast-forward respectively. No Epic
-currently open.
+`feature/phase6b-metadata-deploy` has PHASE 6b (Metadata deploy() pipeline, 8 more
+editable types) complete, docs updated, pending final verification + push. Everything
+else this session (`bug/translation-mode-editor` PR #1, `bug/tooltip-click-through-closes`
+PR #2) is already merged to `main`. No other Epic open.
 
-## Git workflow (established this session)
+**Open question, not yet decided:** whether to remove Copy SOQL/XML Member (PHASE 14,
+`DECISIONS.md #48`) — raised 2026-07-21 on the theory that PHASE 16's Workspace will
+make manual snippet-copying redundant. Recommended removing it; user hasn't confirmed
+either way yet. Don't act on this without an explicit go-ahead.
+
+## Git workflow (established 2026-07-20)
 
 `main` is kept stable; work happens on `feature/`/`bug/`/`refactor/` branches per
-Epic/fix/refactor, merged back once real-org-verified — PR #1 (this session's
-stabilization fixes) is the first PR merged under this workflow, at
-https://github.com/ManuelRP15/SalesLens. Branch naming, commit, and PR conventions are
-documented in `WORKFLOW.md`'s "Git workflow" section; a PR description template lives
-at `.github/PULL_REQUEST_TEMPLATE.md`. The repo had no version control before
-2026-07-20 — the first commit on `main` is that pre-git snapshot.
+Epic/fix/refactor, merged back once real-org-verified. Branch naming, commit, and PR
+conventions are documented in `WORKFLOW.md`'s "Git workflow" section; a PR description
+template lives at `.github/PULL_REQUEST_TEMPLATE.md`. Repo:
+https://github.com/ManuelRP15/SalesLens.
 
-## What just happened (most recent session — stabilization)
+## What just happened (most recent session — PHASE 6b + hover fix)
 
-Real-org testing (the first this project has had) surfaced two genuine bugs, both
-root-caused and fixed on `bug/translation-mode-editor`:
+**PHASE 6b shipped** (`DECISIONS.md #53`) — editing extended from Custom-Labels-only to
+9 of 13 `LabelType`s: `FieldLabel`, `RecordType`, `WebLink`, `QuickAction`,
+`LayoutSection`, `PicklistValue` (both field-scoped and global-value-set), `CustomTab`,
+`CustomApplication` now save through a new Metadata API `deploy()` pipeline
+(`metadata-write.ts`), alongside Custom Label's existing Tooling API PATCH path. Same
+shared tooltip editor, same optimistic-concurrency discipline, same
+`isEditableLabelType()` gate — almost no UI code changed. `ObjectLabel`/`RelatedList`
+stay deferred (PHASE 6c, `<caseValues>` grammatical-case complexity);
+`StandardButton`/`StandardTab` are permanently non-editable (Salesforce's own
+platform-controlled translations, not admin content). Unit-tested (preserveOrder
+patch/insert/fresh-document logic, 12 new tests) but **NOT real-org verified — this is
+a genuine write to org metadata, confirm on a sandbox/dev org first**, starting with
+one `FieldLabel` edit.
 
-- **Translation Mode's editor opened and immediately closed itself (~1ms)** —
-  editing was completely broken, not just glitchy. Root cause: `CandidateBlock`
-  reported "not editing" to the content script on its own first render (before a
-  separate mount effect had a chance to flip it to "editing"), which Translation
-  Mode's `reconcileAfterEdit()` treated as "tear the tooltip down." Fixed by seeding
-  `editingLang`/`editingBaseline` directly from `autoEditLanguage` in their `useState`
-  initializers instead of a lagging mount effect — see `DECISIONS.md #50`.
-- **Custom Field Setup navigation gave "Insufficient Privileges" for every custom
-  field** — the URL used the field's API name, but Salesforce's real route for a
-  custom field needs its `CustomField` record Id instead. Standard fields (API-name
-  route) were unaffected. Fixed by fetching `CustomField.Id` via a new Tooling API
-  call and routing custom fields through it — see `DECISIONS.md #51`. **This fix is a
-  strong hypothesis, not yet confirmed against a real click** — same status as the
-  CustomLabel URL below.
+**Also this session:** fixed the tooltip closing on any click inside it, even
+pass-through clicks that hit real page content underneath (`DECISIONS.md #52`, PR #2,
+merged) — reverses lesson #45's old tradeoff per direct product feedback.
 
-Also this session: merged PHASE 17 (Enter-to-edit keyboard shortcut, `DECISIONS.md
-#49`) to `main`, and established the git workflow described above.
+Previous session (2026-07-20, stabilization): fixed Translation Mode's editor
+immediately closing itself (`#50`) and custom-field Setup navigation
+("Insufficient Privileges", `#51`), merged PHASE 17 (Enter-to-edit, `#49`), established
+the git workflow above (PR #1, merged).
 
-Previous session: a batch of hover polish + two new capabilities, self-scoped from the
-roadmap in one sitting (see `DECISIONS.md #44–#48`):
-- **Hover fine-tuning**: text resolution now checks actual rendered glyph rects, not
-  just the DOM box (fixes resolving text the cursor wasn't really over, `#44`); the
-  tooltip's non-interactive surface is `pointer-events: none` so it no longer
-  permanently blocks reaching content it happens to cover (`#45`).
-- **Translation Mode can now edit Custom Labels**: editable chips reopen the SAME
-  hover-tooltip editor (concurrency control included) anchored at the click — not a
-  second implementation (`#46`).
-- **PHASE 5 (Navigate to Setup) shipped** — click the type badge (`#47`).
-- **PHASE 14's Copy SOQL / Copy XML Member shipped**, scoped to types with a confident
-  Metadata API mapping only (`#48`).
+Previous session: a batch of hover polish + two new capabilities (`#44`–`#48`): hover
+glyph-rect fine-tuning, Translation Mode Custom Label editing, PHASE 5 Setup
+navigation, PHASE 14 Copy SOQL/XML.
 
-Previous session: documentation architecture rebuilt (`CLAUDE.md` + `docs/*.md`,
-replacing the old `STI-*.md` set) and hover/editing stabilization (optimistic
-concurrency, Inspection Mode) — see `DECISIONS.md #41–#43`.
+Previous session: documentation architecture rebuilt (`CLAUDE.md` + `docs/*.md`) and
+hover/editing stabilization (optimistic concurrency, Inspection Mode) — `#41`–`#43`.
 
 ## Known gaps / untested — check before assuming something works
 
 - **Nothing in this codebase has been verified against a real Salesforce org by the
-  agent, ever.** The two bugs above are the first real-org findings this project has
-  had; every other "done" feature is still only confirmed by build/typecheck/unit
-  tests. Don't report something as working end-to-end without saying this caveat.
-- The CustomLabel Setup-navigation URL (PHASE 5, `DECISIONS.md #47`) and the new
-  custom-field Id-based URL (`DECISIONS.md #51`) both specifically need a real-org
-  click to confirm they open the expected page.
-- The Translation Mode editor fix (`DECISIONS.md #50`) needs a real-org click to
-  confirm the ~1ms-close bug is actually gone, not just theoretically fixed.
+  agent, ever.** Every "done" feature is confirmed only by build/typecheck/unit tests
+  unless stated otherwise below. Don't report something as working end-to-end without
+  saying this caveat.
+- **PHASE 6b's deploy() pipeline (`DECISIONS.md #53`) is the highest-stakes unverified
+  item in the project** — it's a real write to org metadata, not just a UI behavior.
+  Test on a sandbox/dev org before trusting broadly: both patching an EXISTING
+  translation and filling in a MISSING one, for at least `FieldLabel` and one other
+  type (e.g. `PicklistValue`).
+- The tooltip persist-through-inside-clicks fix (`#52`) and the Translation Mode editor
+  fix (`#50`) are both merged but still need a real-org click to confirm.
+- The CustomLabel Setup-navigation URL (`#47`) and the custom-field Id-based URL
+  (`#51`) both specifically need a real-org click to confirm they open the expected
+  page.
 - Custom Label base-language editing assumes the org's default language is always keyed
-  `"en_US"` (`DECISIONS.md #41`) — untested against a non-English-base org.
-- Editing (hover tooltip AND Translation Mode chips) is Custom Labels only; every other
-  `LabelType` has no edit affordance at all by design (`DECISIONS.md #41`, `CLAUDE.md`
-  rule #7).
-- Buttons/quick actions/sections/related lists (`WebLink`, `StandardButton`,
-  `QuickAction`, `LayoutSection`, `RelatedList`) are implemented but explicitly flagged
+  `"en_US"` (`#41`) — untested against a non-English-base org.
+- Buttons/quick actions/sections/related lists are implemented but explicitly flagged
   "not yet verified against a real org" in `ROADMAP.md` PHASE 4/9 notes.
-- Enter-to-edit (PHASE 17, `DECISIONS.md #49`) has not been verified against a real
-  org/keyboard either — same caveat as everything else on this list.
+- Enter-to-edit (PHASE 17, `#49`) has not been verified against a real org/keyboard.
 
 ## Immediate next step
 
-Both merged fixes (Translation Mode editor, custom-field Setup nav) still need an
-actual real-org click to CONFIRM they work — merging isn't the same as verifying, see
-"Known gaps" above. Once confirmed, next candidates (see `ROADMAP.md`'s status table):
-PHASE 16 (Workspace/package.xml Builder, **Muy Alta** priority, large — needs its own
-dedicated session(s), not a quick add-on), the rest of PHASE 17 (arrow-key navigation,
-blocked on PHASE 18's match list), PHASE 18/19 (Translation Navigator, Hover
-History/Favorites).
+Verify + push `feature/phase6b-metadata-deploy`, open its PR. Once the user has
+real-org-tested PHASE 6b (sandbox first) and it's merged, decide the Copy SOQL/XML
+question above, then next candidates (see `ROADMAP.md`'s status table): PHASE 16
+(Workspace/package.xml Builder, **Muy Alta** priority, large — needs its own dedicated
+session(s)), PHASE 6c (ObjectLabel/RelatedList), the rest of PHASE 17 (arrow-key
+navigation, blocked on PHASE 18's match list).

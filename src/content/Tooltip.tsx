@@ -148,6 +148,8 @@ interface TranslationEditorProps {
   errorMessage?: string;
   onSave: (value: string) => void;
   onCancel: () => void;
+  /** "Saving…" (Custom Labels, a near-instant Tooling API PATCH) or "Deploying…" (PHASE 6b's other 8 types, a slower retrieve-then-deploy() round trip) — sets user expectations correctly, since the latter can take several seconds. */
+  savingLabel: string;
 }
 
 /**
@@ -158,7 +160,7 @@ interface TranslationEditorProps {
  * preventDefault so clicking them doesn't blur the textarea first and race the
  * blur-triggered commit against the button's own click handler.
  */
-function TranslationEditor({ initialValue, status, errorMessage, onSave, onCancel }: TranslationEditorProps) {
+function TranslationEditor({ initialValue, status, errorMessage, onSave, onCancel, savingLabel }: TranslationEditorProps) {
   const [value, setValue] = useState(initialValue);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const saving = status === "saving";
@@ -219,7 +221,7 @@ function TranslationEditor({ initialValue, status, errorMessage, onSave, onCance
           onMouseDown={(e) => e.preventDefault()}
           onClick={commit}
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? savingLabel : "Save"}
         </button>
         <button
           type="button"
@@ -418,6 +420,7 @@ function CandidateBlock({
                     errorMessage={editError}
                     onSave={(v) => saveEdit(lang, v)}
                     onCancel={cancelEdit}
+                    savingLabel={entry.type === "CustomLabel" ? "Saving…" : "Deploying…"}
                   />
                 ) : (
                   <>

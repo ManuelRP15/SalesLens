@@ -33,9 +33,11 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 | `index-builder.ts` | `buildReverseIndex()` + `resolveText()` — the disambiguation funnel. The single most important algorithm in the project; always returns 0 or 1 candidates, never a list (`DECISIONS.md #28`). |
 | `index-builder.test.ts` | Unit tests for the funnel above — no Chrome/Salesforce dependency. |
 | `salesforce-api.ts` | Tooling API + regular REST Query API: Custom Labels (`ExternalString`/`ExternalStringLocalization`), field/object/tab/app/webLink/quickAction base labels, and the CustomLabel write path (`saveCustomLabelTranslation`, `fetchLiveCustomLabelValue` for optimistic concurrency). |
-| `metadata-api.ts` | Metadata API SOAP client (`listMetadata`/`retrieve`/`checkRetrieveStatus`) + zip/XML parsing of `CustomObjectTranslation`/`Translations`/`GlobalValueSetTranslation`. |
+| `metadata-api.ts` | Metadata API SOAP client — read side: `listMetadata`/`retrieve`/`checkRetrieveStatus` + friendly-object zip/XML parsing of `CustomObjectTranslation`/`Translations`/`GlobalValueSetTranslation`. Write side (PHASE 6b): `deployMetadataFile`/`checkDeployStatus`, plus a separate **preserveOrder** XML parse/build pair (`parseXmlPreserveOrder`/`buildXmlPreserveOrder`) and AST helpers (`xmlFirstChild`/`xmlAllChildren`/`xmlLeafText`/`xmlSetLeafText`/`freshXmlDocument`) used ONLY for lossless patch-one-node writes — the read-side friendly parser is intentionally lossy and unsuitable for writing back. |
 | `metadata-api.test.ts` | Unit tests for the XML/zip parsing above. |
-| `metadata-translations.ts` | Orchestrator: seeds `FieldLabel`/`ObjectLabel`/`PicklistValue`/etc. from `describe-api.ts`'s standard translations, overlays `CustomObjectTranslation` zip content as customized overrides. |
+| `metadata-translations.ts` | Read-side orchestrator: seeds `FieldLabel`/`ObjectLabel`/`PicklistValue`/etc. from `describe-api.ts`'s standard translations, overlays `CustomObjectTranslation` zip content as customized overrides. |
+| `metadata-write.ts` | Write-side orchestrator (PHASE 6b, `DECISIONS.md #53`): `saveMetadataTranslation` — per-`LabelType` target resolution (which XML file/node, plus the lesson-#15 sibling-unlock members retrieve() needs), locate-or-insert, optimistic concurrency, deploy. The `saveCustomLabelTranslation`-shaped counterpart for every editable type except `CustomLabel`. |
+| `metadata-write.test.ts` | Unit tests for the preserveOrder patch/insert/fresh-document logic above — fixture XML strings, no live org needed. |
 | `describe-api.ts` | Partner API SOAP client (`describeSObjects` + `LocaleOptions`, `describeLayout` via REST): Salesforce's own standard/default translations, independent of any org customization. |
 | `platform-labels.ts` | Curated built-in catalog of standard Salesforce platform UI strings (buttons, tabs) in es/fr/nl_NL — legitimate ONLY because these are Salesforce's own translations, identical in every org (`DECISIONS.md #37`). Never add anything admin-authored here. |
 | `mock-data.ts` | Sample `LabelEntry[]` used when there's no real org session (dev/no-`sid` fallback). |
@@ -81,7 +83,7 @@ Content Script (Lightning page context)
   ├─ Hover engine (Inspection Mode / Always Hover, DECISIONS.md #43):
   │     resolves whatever's under the cursor → RESOLVE_TEXT → background → renders tooltip
   ├─ Translation Mode: full-page scan → RESOLVE_TEXTS_BULK → background → inline chips
-  ├─ Inline editor (Custom Labels only): SAVE_TRANSLATION → background → live UI update
+  ├─ Inline editor (9 of 13 LabelTypes, see rule #8): SAVE_TRANSLATION → background → live UI update
   └─ Listens for REQUEST_REFETCH (popup's "Refresh index now")
 
 Background Service Worker
@@ -92,8 +94,10 @@ Background Service Worker
   │   → merges into one LabelEntry[], rebuilds the reverse index, persists to storage,
   │     recomputes Translation Health
   ├─ RESOLVE_TEXT / RESOLVE_TEXTS_BULK: reverse-index lookup → resolveText() → candidates
-  ├─ SAVE_TRANSLATION: live-value conflict check → PATCH/POST → folds result back into
-  │     the same in-memory index + storage (no separate "apply this edit" path)
+  ├─ SAVE_TRANSLATION: live-value conflict check, then either PATCH/POST
+  │     (saveCustomLabelTranslation) or retrieve→patch→deploy() (saveMetadataTranslation,
+  │     PHASE 6b) depending on labelType → folds result back into the same in-memory
+  │     index + storage either way (no separate "apply this edit" path)
   └─ GET_SETTINGS: reads chrome.storage.local
 
 Popup
@@ -124,19 +128,31 @@ real debugging session at least once (see the linked `DECISIONS.md` entry).
    surface context, tag-type hints) narrows a funnel toward exactly one answer or
    silence — never a ranked, unresolved shortlist (`#28`). This is a product rule as
    much as a technical one; see `PRODUCT.md`'s Quality Bars.
-6. **Every Metadata API / SOAP call degrades gracefully** (`[]`/`null`/empty `Map`, logs
-   a `console.warn`, never throws to its caller) — one missing permission or an org
-   without Translation Workbench can't break Custom Labels or anything else unrelated.
+6. **Every Metadata API / SOAP call on the READ path degrades gracefully** (`[]`/`null`/
+   empty `Map`, logs a `console.warn`, never throws to its caller) — one missing
+   permission or an org without Translation Workbench can't break Custom Labels or
+   anything else unrelated. **The WRITE path is the deliberate exception**:
+   `deployMetadataFile`/`checkDeployStatus` (`metadata-api.ts`) and
+   `saveMetadataTranslation` (`metadata-write.ts`) THROW on failure, same as
+   `saveCustomLabelTranslation` already did — a save the user explicitly asked for must
+   surface a real error, not vanish. `background/index.ts`'s `saveTranslation()` is the
+   one call site that catches this and turns it into `SaveTranslationResponse.error`.
 7. **Base (master) labels are always fetched separately from translated ones** — the
    Metadata API only ever returns the *translated* value; the base value needs its own
    tightly-scoped Tooling/REST query, limited to exactly the API names already
    discovered via `listMetadata` (`#9`).
-8. **Editing is scoped to Custom Labels only.** Their translations are standalone
-   Tooling API records (PATCH/POST-able individually). Every other `LabelType` lives
-   inside a `CustomObjectTranslation`/`Translations`/`GlobalValueSetTranslation` XML
-   file, only writable via a full Metadata API `deploy()` — a materially different,
-   unbuilt pipeline (`#41`). Don't add an edit affordance for another type without
-   building that pipeline first.
+8. **Editing has two write mechanisms behind one gate (`isEditableLabelType()`,
+   `types.ts`).** Custom Label translations are standalone Tooling API records
+   (PATCH/POST-able individually, `salesforce-api.ts`). Every other editable type's
+   translation lives inside a `CustomObjectTranslation`/`Translations`/
+   `GlobalValueSetTranslation` XML file, written via a Metadata API `deploy()`
+   (`metadata-write.ts`, PHASE 6b, `#41`, `#53`). **`ObjectLabel`/`RelatedList` stay
+   non-editable** — their target (`<caseValues>`) can hold multiple grammatical-case
+   entries for gendered languages, not yet safely patchable — and
+   **`StandardButton`/`StandardTab` are PERMANENTLY non-editable**, not a pipeline
+   gap: they're Salesforce's own platform-controlled translations, there is no
+   admin-authored value to write back to. Don't add a type to `EDITABLE_LABEL_TYPES`
+   without a real write path backing it.
 9. **Every translation write does optimistic concurrency control** — re-read the live
    org value immediately before writing, abort (don't overwrite) on mismatch (`#42`).
    Non-negotiable for any future write path too, not just this one.
@@ -154,8 +170,11 @@ Full detail and status (done/pending/untested) for each of these lives in
 duplicate of that detail.
 
 - **Hover Inspector** (PHASE 4/7) — tooltip with type, API name, translations.
-- **Inline editing** (PHASE 6, Custom Labels only) — edit in the tooltip, optimistic
-  concurrency, keyboard-first (Enter/Esc/Ctrl+S).
+- **Inline editing** (PHASE 6/6b — CustomLabel, FieldLabel, RecordType, WebLink,
+  QuickAction, LayoutSection, PicklistValue, CustomTab, CustomApplication) — edit in
+  the tooltip, optimistic concurrency, keyboard-first (Enter/Esc/Ctrl+S). ObjectLabel/
+  RelatedList deferred, StandardButton/StandardTab permanently non-editable — see rule
+  #8 and `DECISIONS.md #53`.
 - **Translation Mode** (PHASE 9) — whole-page inline translation chips.
 - **Translation Health** (PHASE 10) — dedicated page, org-wide missing-translation
   report.
