@@ -8,7 +8,7 @@ import {
   xmlLeafText,
   xmlSetLeafText,
 } from "./metadata-api";
-import { assertNoGenderedCase, isMetadataWriteType, locateOrCreateBlock, splitLast } from "./metadata-write";
+import { assertNoGenderedCase, isMetadataWriteType, isWriteConflict, locateOrCreateBlock, splitLast } from "./metadata-write";
 
 /** Finds the root element's own children array by tag, the same way saveMetadataTranslation does. */
 function rootChildrenOf(doc: ReturnType<typeof parseXmlPreserveOrder>, rootTag: string) {
@@ -38,6 +38,32 @@ describe("isMetadataWriteType", () => {
     for (const t of ["CustomLabel", "ObjectLabel", "RelatedList", "StandardButton", "StandardTab"] as const) {
       expect(isMetadataWriteType(t)).toBe(false);
     }
+  });
+});
+
+describe("isWriteConflict (optimistic-concurrency baseline, DECISIONS.md #54)", () => {
+  it("does NOT conflict when editing a STANDARD value that has no override in the file yet (the bug that blanked rows)", () => {
+    // Displayed "Industria" was Salesforce's standard translation; the file has no
+    // override (currentValue ""). This must proceed, not report a bogus conflict.
+    expect(isWriteConflict("", "Industria", /* showedStandardValue */ true)).toBe(false);
+  });
+
+  it("does NOT conflict when the file already holds exactly the override we displayed", () => {
+    expect(isWriteConflict("Industria", "Industria", false)).toBe(false);
+    expect(isWriteConflict("Industria", "Industria", true)).toBe(false);
+  });
+
+  it("DOES conflict when the file holds a different override than what we displayed (real drift)", () => {
+    // Someone else changed the override since we loaded — must not clobber it.
+    expect(isWriteConflict("Otra cosa", "Industria", false)).toBe(true);
+  });
+
+  it("DOES conflict when we showed a standard value but someone has since added a (different) override", () => {
+    expect(isWriteConflict("Override ajeno", "Industria", true)).toBe(true);
+  });
+
+  it("does NOT conflict when a customized override matches, even if it happens to be empty", () => {
+    expect(isWriteConflict("", "", false)).toBe(false);
   });
 });
 

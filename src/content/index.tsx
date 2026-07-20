@@ -214,20 +214,18 @@ window.addEventListener(
 // its magnifier cursor) stuck on when focus leaves the page entirely.
 window.addEventListener("blur", exitInspectionMode);
 
-// A click OUTSIDE the tooltip's visual bounds ends Inspection Mode / closes the
-// Translation Mode click-editor — the explicit "I'm done here" signal. Product
-// decision (2026-07-20, supersedes lesson #45's tradeoff — see DECISIONS.md #52):
-// the tooltip must persist through a click ANYWHERE inside its visible box, even
-// though the box's non-interactive surface is pointer-events:none (see tooltip.css)
-// and such a click passes through to whatever real page element is visually
-// underneath — including one that reacts to being clicked. Only a click genuinely
-// outside the rendered tooltip, Escape, or re-pressing the toggle key should close
-// it. `isWithinTooltipZone` (coordinate-based, already used by the hover engine) is
-// the right check here, NOT `e.target === shadowHost` alone — that identity check
-// only catches the tooltip's real controls, not its pass-through background.
+// A click OUTSIDE the tooltip ends Inspection Mode / closes the Translation Mode
+// click-editor — the explicit "I'm done here" signal. The tooltip is now a SOLID
+// surface (tooltip.css: pointer-events:auto), and because it lives in a CLOSED shadow
+// root, every click that originates anywhere inside it retargets to `shadowHost` for
+// this document-level listener. So the single `e.target === shadowHost` check keeps
+// the tooltip open for ANY inside click, by construction — no rect/coordinate math
+// that could go stale, which is exactly what made the earlier pointer-events:none +
+// geometry approach (DECISIONS.md #45/#52) still close on some inside clicks. Only a
+// click on genuinely different page content (target ≠ shadowHost), Escape, or the
+// toggle key closes it now. See DECISIONS.md #54.
 document.addEventListener("click", (e) => {
   if (shadowHost && e.target === shadowHost) return;
-  if (isWithinTooltipZone(e.clientX, e.clientY)) return;
   if (inspectionModeActive) exitInspectionMode();
   if (tmEditorOpen) closeTmEditor();
 });

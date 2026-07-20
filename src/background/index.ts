@@ -168,6 +168,17 @@ async function saveTranslation(req: SaveTranslationRequest): Promise<SaveTransla
     if (result.newLocalizationId) {
       entry.localizationIdsByLang = { ...(entry.localizationIdsByLang ?? {}), [req.language]: result.newLocalizationId };
     }
+    // For the deploy()-backed types, a successful save just WROTE an admin override for
+    // this language — record that so (a) the "✎ customized" mark shows immediately and
+    // (b) a SECOND edit in the same session compares against the override we just wrote,
+    // not against "no override" (which would otherwise report a bogus conflict — the
+    // mirror image of the blanking bug fixed in metadata-write.ts, see DECISIONS.md #54).
+    // CustomLabels have no standard/override distinction, so they're left untouched.
+    if (req.labelType !== "CustomLabel") {
+      const customized = new Set(entry.customizedLanguages ?? []);
+      customized.add(req.language);
+      entry.customizedLanguages = [...customized];
+    }
     await setIndexFromRealData(allEntries);
     return { ok: true, entry };
   } catch (err) {

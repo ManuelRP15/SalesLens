@@ -348,7 +348,6 @@ export function resolveHoverTarget(x: number, y: number): HoverTarget | null {
   if (!el) return null;
 
   const text = extractOwnText(el);
-  console.log("[STI] element under cursor:", el.tagName, "own text:", JSON.stringify(text));
   if (!text) return null;
 
   // Only when the wrapper fallback produced the text (no direct text of its own).
