@@ -7,10 +7,9 @@
 
 ## Active work
 
-`feature/phase6b-metadata-deploy` has PHASE 6b (Metadata deploy() pipeline, 8 more
-editable types) complete, docs updated, pending final verification + push. Everything
-else this session (`bug/translation-mode-editor` PR #1, `bug/tooltip-click-through-closes`
-PR #2) is already merged to `main`. No other Epic open.
+`bug/editing-and-hover-polish` fixes the two problems the FIRST real-org test of PHASE
+6b surfaced (see below) — pending verification + push. PHASE 6b itself (`DECISIONS.md
+#53`) is already merged to `main`. No other Epic open.
 
 **Open question, not yet decided:** whether to remove Copy SOQL/XML Member (PHASE 14,
 `DECISIONS.md #48`) — raised 2026-07-21 on the theory that PHASE 16's Workspace will
@@ -25,7 +24,31 @@ conventions are documented in `WORKFLOW.md`'s "Git workflow" section; a PR descr
 template lives at `.github/PULL_REQUEST_TEMPLATE.md`. Repo:
 https://github.com/ManuelRP15/SalesLens.
 
-## What just happened (most recent session — PHASE 6b + hover fix)
+## What just happened (most recent session — first real-org test of PHASE 6b)
+
+Real-org testing of PHASE 6b found two problems, both fixed on
+`bug/editing-and-hover-polish` (`DECISIONS.md #54`):
+- **Editing a metadata translation blanked the row and dropped the language.** The
+  optimistic-concurrency check compared the deployable file's admin OVERRIDE against
+  the tooltip's displayed value — but the displayed value is usually Salesforce's
+  STANDARD translation, which isn't in that file at all, so every such save reported a
+  bogus conflict and adopted the empty value. Fixed by comparing against the expected
+  override (empty when the shown value was standard), plus marking the language
+  customized after a successful save so a second edit doesn't re-trigger it. This was
+  THE reason non-label editing "went very badly"; the 7 non-QuickAction types should
+  now edit cleanly.
+- **The tooltip still closed on a click inside it.** Made it a solid surface
+  (`pointer-events: auto`) so any inside click retargets to the closed shadow host and
+  the `e.target === shadowHost` check keeps it open — no stale geometry. Reverses
+  #45/#52's pass-through approach (accepted tradeoff: can't click *through* it anymore).
+  Also removed a per-pointer-move `console.log` that hurt hover responsiveness.
+- **QuickAction limitation surfaced:** global/standard actions (New Contact, Log a
+  Call…) can't be written via the object's CustomObjectTranslation and now fail with a
+  clear "not supported yet" message instead of a raw metadata error. Object-specific
+  custom quick actions still work. Full global-QA support deferred (needs a real-org-
+  verified `Translations` write path).
+
+## Earlier this session — PHASE 6b + hover fix
 
 **PHASE 6b shipped** (`DECISIONS.md #53`) — editing extended from Custom-Labels-only to
 9 of 13 `LabelType`s: `FieldLabel`, `RecordType`, `WebLink`, `QuickAction`,
@@ -63,13 +86,16 @@ hover/editing stabilization (optimistic concurrency, Inspection Mode) — `#41`�
   agent, ever.** Every "done" feature is confirmed only by build/typecheck/unit tests
   unless stated otherwise below. Don't report something as working end-to-end without
   saying this caveat.
-- **PHASE 6b's deploy() pipeline (`DECISIONS.md #53`) is the highest-stakes unverified
-  item in the project** — it's a real write to org metadata, not just a UI behavior.
-  Test on a sandbox/dev org before trusting broadly: both patching an EXISTING
-  translation and filling in a MISSING one, for at least `FieldLabel` and one other
-  type (e.g. `PicklistValue`).
-- The tooltip persist-through-inside-clicks fix (`#52`) and the Translation Mode editor
-  fix (`#50`) are both merged but still need a real-org click to confirm.
+- **PHASE 6b's deploy() pipeline is a real write to org metadata** — still the
+  highest-stakes area. The blanking bug (`#54`) is fixed, but re-test on a sandbox/dev
+  org: patch an EXISTING translation AND fill in a MISSING one, for at least
+  `FieldLabel` and `PicklistValue`. Confirm the value no longer vanishes on save and a
+  second consecutive edit of the same row doesn't false-conflict.
+- **QuickAction editing works only for object-specific custom actions** — global/
+  standard actions (New Contact, Log a Call…) show a "not supported yet" message
+  (`#54`). Full global-QA support is deferred.
+- The tooltip solid/persist fix (`#54`, supersedes `#52`) and the Translation Mode
+  editor fix (`#50`) still need a real-org click to confirm.
 - The CustomLabel Setup-navigation URL (`#47`) and the custom-field Id-based URL
   (`#51`) both specifically need a real-org click to confirm they open the expected
   page.
@@ -81,9 +107,9 @@ hover/editing stabilization (optimistic concurrency, Inspection Mode) — `#41`�
 
 ## Immediate next step
 
-Verify + push `feature/phase6b-metadata-deploy`, open its PR. Once the user has
-real-org-tested PHASE 6b (sandbox first) and it's merged, decide the Copy SOQL/XML
-question above, then next candidates (see `ROADMAP.md`'s status table): PHASE 16
-(Workspace/package.xml Builder, **Muy Alta** priority, large — needs its own dedicated
-session(s)), PHASE 6c (ObjectLabel/RelatedList), the rest of PHASE 17 (arrow-key
-navigation, blocked on PHASE 18's match list).
+Push `bug/editing-and-hover-polish`, open its PR, and re-test PHASE 6b editing on a
+sandbox org (the blanking bug is the thing to reconfirm). Once merged, decide the Copy
+SOQL/XML question above, then next candidates (see `ROADMAP.md`'s status table): PHASE
+16 (Workspace/package.xml Builder, **Muy Alta** priority, large — needs its own
+dedicated session(s)), PHASE 6c (ObjectLabel/RelatedList + global QuickAction), the
+rest of PHASE 17 (arrow-key navigation, blocked on PHASE 18's match list).
