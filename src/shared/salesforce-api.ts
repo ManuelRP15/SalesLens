@@ -240,6 +240,44 @@ export async function fetchFieldLabels(
   return result;
 }
 
+interface CustomFieldRecord {
+  Id: string;
+  DeveloperName: string;
+  TableEnumOrId: string;
+}
+
+/**
+ * Key of the returned map: "ObjectApiName.FieldApiName" (with the `__c` suffix,
+ * matching fetchFieldLabels' keys) → the CustomField's real Tooling-API Id. Standard
+ * fields have no CustomField row at all (they're not "custom" — the Tooling API's
+ * `CustomField` sObject only lists custom ones), so they're simply absent from the
+ * result, same "not present = don't guess" pattern as everywhere else. `DeveloperName`
+ * here does NOT include the `__c` suffix (Salesforce's own convention for this
+ * specific field), so it's added back on to match FieldDefinition's key format.
+ */
+export async function fetchCustomFieldIds(
+  apiHost: string,
+  sessionId: string,
+  objectApiNames: string[]
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const inClause = soqlInClause(objectApiNames);
+  if (!inClause) return result;
+  try {
+    const rows = await toolingQuery<CustomFieldRecord>(
+      apiHost, sessionId,
+      `SELECT Id, DeveloperName, TableEnumOrId FROM CustomField WHERE TableEnumOrId IN ${inClause}`
+    );
+    for (const row of rows) {
+      result.set(`${row.TableEnumOrId}.${row.DeveloperName}__c`, row.Id);
+    }
+    console.log(`[STI] CustomField: ${result.size} custom field Id(s) resolved.`);
+  } catch (err) {
+    console.warn("[STI] fetchCustomFieldIds error:", err);
+  }
+  return result;
+}
+
 interface RecordTypeRecord {
   DeveloperName: string;
   Name: string;

@@ -102,8 +102,13 @@ export function displayApiName(entry: LabelEntry): string {
  * pattern is confirmed, the same evidence bar as everything else in this codebase.
  * CustomLabel's URL is NOT yet verified against a real org — it's the well-known
  * Lightning Setup "edit a Custom Label by Id" deep link, but hasn't been clicked
- * against a live session. FieldLabel/ObjectLabel use the standard Object Manager
- * routes, which are far more commonly relied upon and lower-risk.
+ * against a live session. ObjectLabel uses the standard Object Manager Details route.
+ * FieldLabel is split by field kind (DECISIONS.md #51): standard fields keep the
+ * API-name-based Object Manager route (unverified but unreported-broken); CUSTOM
+ * fields need the field's real CustomField Id instead — confirmed broken
+ * ("Insufficient Privileges" for every custom field) when API name was used, and the
+ * Id-based route is a strong, but still real-org-UNVERIFIED, hypothesis. Silence
+ * (null) rather than a second guess when a custom field's Id wasn't resolved.
  */
 export function setupPath(entry: LabelEntry): string | null {
   switch (entry.type) {
@@ -113,9 +118,11 @@ export function setupPath(entry: LabelEntry): string | null {
         : null;
     case "FieldLabel": {
       const [objectApiName, fieldApiName] = entry.apiName.split(".");
-      return objectApiName && fieldApiName
-        ? `/lightning/setup/ObjectManager/${objectApiName}/FieldsAndRelationships/${fieldApiName}/view`
-        : null;
+      if (!objectApiName || !fieldApiName) return null;
+      if (fieldApiName.endsWith("__c")) {
+        return entry.id ? `/lightning/setup/ObjectManager/${objectApiName}/FieldsAndRelationships/${entry.id}/view` : null;
+      }
+      return `/lightning/setup/ObjectManager/${objectApiName}/FieldsAndRelationships/${fieldApiName}/view`;
     }
     case "ObjectLabel":
       return `/lightning/setup/ObjectManager/${entry.apiName}/Details/view`;

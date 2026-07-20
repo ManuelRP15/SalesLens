@@ -35,9 +35,14 @@ export interface LabelEntry {
    */
   customizedLanguages?: string[];
   /**
-   * CustomLabel entries only: the underlying ExternalString record's own Id — needed to
-   * PATCH the base-language value directly, and as the parent Id when POSTing a brand
-   * new ExternalStringLocalization row for a language that has none yet (PHASE 6).
+   * The entry's underlying Salesforce record Id, when one exists and this project needs
+   * it. Two unrelated uses share the field rather than each getting their own:
+   * - CustomLabel: the ExternalString record's own Id — needed to PATCH the
+   *   base-language value directly, and as the parent Id when POSTing a brand new
+   *   ExternalStringLocalization row for a language that has none yet (PHASE 6).
+   * - FieldLabel, custom fields only (`__c`): the CustomField record's Id — Setup's
+   *   field-detail route needs it, not the field's API name (DECISIONS.md #51).
+   *   Standard fields have no CustomField row at all, so this stays undefined for them.
    */
   id?: string;
   /**
