@@ -7,25 +7,42 @@
 
 ## Active work
 
-Nothing in progress. `feature/keyboard-editing-shortcuts` branch has the Enter-to-edit
-shortcut complete and ready to merge to `main` (first branch under the new git
-workflow — see below). No Epic currently open.
+`bug/translation-mode-editor` branch has this session's stabilization fixes complete
+(Translation Mode editor + custom-field Setup navigation), pending real-org
+verification before merge to `main`. `feature/keyboard-editing-shortcuts` (PHASE 17)
+already merged to `main` this session. No Epic currently open.
 
-## Process change (this session)
+## Git workflow (established this session)
 
-The project now uses git, with `main` kept stable and work done on
-`feature/`/`bug/`/`refactor/` branches per Epic/fix — previously the codebase had no
-version control at all. The initial commit on `main` is the pre-git snapshot; the
-Enter-to-edit shortcut below is the first branch-based piece of work.
+`main` is kept stable; work happens on `feature/`/`bug/`/`refactor/` branches per
+Epic/fix/refactor, merged back (fast-forward where possible) once real-org-verified.
+Branch naming, commit, and PR conventions are documented in `WORKFLOW.md`'s "Git
+workflow" section; a PR description template lives at
+`.github/PULL_REQUEST_TEMPLATE.md`. The repo had no version control before 2026-07-20 —
+the first commit on `main` is that pre-git snapshot.
 
-## What just happened (most recent session)
+## What just happened (most recent session — stabilization)
 
-**PHASE 17: Enter-to-edit keyboard shortcut shipped** (`DECISIONS.md #49`) — Enter opens
-the inline editor on the currently-inspected tooltip's first language row while
-Inspection Mode is on; Ctrl+S (save) and Escape (cancel) turned out to already work
-once an editor is focused, so this closed the one real gap. Arrow-key navigation
-between matches and further hotkey configurability remain open, blocked on PHASE 18's
-match list.
+Real-org testing (the first this project has had) surfaced two genuine bugs, both
+root-caused and fixed on `bug/translation-mode-editor`:
+
+- **Translation Mode's editor opened and immediately closed itself (~1ms)** —
+  editing was completely broken, not just glitchy. Root cause: `CandidateBlock`
+  reported "not editing" to the content script on its own first render (before a
+  separate mount effect had a chance to flip it to "editing"), which Translation
+  Mode's `reconcileAfterEdit()` treated as "tear the tooltip down." Fixed by seeding
+  `editingLang`/`editingBaseline` directly from `autoEditLanguage` in their `useState`
+  initializers instead of a lagging mount effect — see `DECISIONS.md #50`.
+- **Custom Field Setup navigation gave "Insufficient Privileges" for every custom
+  field** — the URL used the field's API name, but Salesforce's real route for a
+  custom field needs its `CustomField` record Id instead. Standard fields (API-name
+  route) were unaffected. Fixed by fetching `CustomField.Id` via a new Tooling API
+  call and routing custom fields through it — see `DECISIONS.md #51`. **This fix is a
+  strong hypothesis, not yet confirmed against a real click** — same status as the
+  CustomLabel URL below.
+
+Also this session: merged PHASE 17 (Enter-to-edit keyboard shortcut, `DECISIONS.md
+#49`) to `main`, and established the git workflow described above.
 
 Previous session: a batch of hover polish + two new capabilities, self-scoped from the
 roadmap in one sitting (see `DECISIONS.md #44–#48`):
@@ -47,12 +64,14 @@ concurrency, Inspection Mode) — see `DECISIONS.md #41–#43`.
 ## Known gaps / untested — check before assuming something works
 
 - **Nothing in this codebase has been verified against a real Salesforce org by the
-  agent, ever.** Every "done" feature is done as far as build/typecheck/unit tests can
-  confirm — real-org behavior (SOAP quirks, actual field data, actual concurrent edits,
-  actual mouse/hover feel) needs the user to check it. Don't report something as
-  working end-to-end without saying this caveat.
-- The CustomLabel Setup-navigation URL (PHASE 5, `DECISIONS.md #47`) specifically needs
-  a real-org click to confirm it opens the edit page as expected.
+  agent, ever.** The two bugs above are the first real-org findings this project has
+  had; every other "done" feature is still only confirmed by build/typecheck/unit
+  tests. Don't report something as working end-to-end without saying this caveat.
+- The CustomLabel Setup-navigation URL (PHASE 5, `DECISIONS.md #47`) and the new
+  custom-field Id-based URL (`DECISIONS.md #51`) both specifically need a real-org
+  click to confirm they open the expected page.
+- The Translation Mode editor fix (`DECISIONS.md #50`) needs a real-org click to
+  confirm the ~1ms-close bug is actually gone, not just theoretically fixed.
 - Custom Label base-language editing assumes the org's default language is always keyed
   `"en_US"` (`DECISIONS.md #41`) — untested against a non-English-base org.
 - Editing (hover tooltip AND Translation Mode chips) is Custom Labels only; every other
@@ -61,14 +80,13 @@ concurrency, Inspection Mode) — see `DECISIONS.md #41–#43`.
 - Buttons/quick actions/sections/related lists (`WebLink`, `StandardButton`,
   `QuickAction`, `LayoutSection`, `RelatedList`) are implemented but explicitly flagged
   "not yet verified against a real org" in `ROADMAP.md` PHASE 4/9 notes.
-
 - Enter-to-edit (PHASE 17, `DECISIONS.md #49`) has not been verified against a real
   org/keyboard either — same caveat as everything else on this list.
 
 ## Immediate next step
 
-Merge `feature/keyboard-editing-shortcuts` once real-org-tested. After that, next
-candidates (see `ROADMAP.md`'s status table): PHASE 16 (Workspace/package.xml Builder,
-**Muy Alta** priority, large — needs its own dedicated session(s), not a quick add-on),
-the rest of PHASE 17 (arrow-key navigation, blocked on PHASE 18's match list), PHASE
-18/19 (Translation Navigator, Hover History/Favorites).
+Real-org-test `bug/translation-mode-editor` (both fixes), then merge to `main`. After
+that, next candidates (see `ROADMAP.md`'s status table): PHASE 16 (Workspace/package.xml
+Builder, **Muy Alta** priority, large — needs its own dedicated session(s), not a quick
+add-on), the rest of PHASE 17 (arrow-key navigation, blocked on PHASE 18's match list),
+PHASE 18/19 (Translation Navigator, Hover History/Favorites).

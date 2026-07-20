@@ -13,7 +13,7 @@
 | # | Phase | Status | Priority (if pending) |
 |---|---|---|---|
 | 4 | Tooltip productivity actions + reliability | ✅ done | — |
-| 5 | Navigation to Setup | ✅ done (CustomLabel URL unverified) | — |
+| 5 | Navigation to Setup | ✅ done (CustomLabel URL + custom-field Id-based URL both unverified) | — |
 | 6 | Inline translation editing | 🟡 v1 done (Custom Labels only) | 6b (other types) needs a deploy() pipeline first |
 | 7 | Standard labels without Translation Workbench | ✅ done | — |
 | 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done, Lens pending | — |
@@ -66,6 +66,13 @@ in a new tab, for `CustomLabel`, `FieldLabel`, and `ObjectLabel` — other types
 guessed URL and stay non-clickable. See `DECISIONS.md #47` for the exact paths and
 `setupPath()` in `tooltip-constants.ts`. **The CustomLabel URL specifically is NOT yet
 verified against a real org** — confirm it before relying on it.
+
+**2026-07-20 stabilization session:** real-org testing found the FieldLabel route gave
+"Insufficient Privileges" for every custom field — fixed by routing custom fields
+through their real `CustomField` Id instead of API name (`DECISIONS.md #51`); standard
+fields are unchanged. **The custom-field Id-based route is also NOT yet verified
+against a real org** — confirm it the same way the CustomLabel URL still needs
+confirming.
 
 ### PHASE 6 — In-place translation editing (Inline Translation Editing) — v1 done, Custom Labels only
 Shipped 2026-07-20 as an inline editor inside the existing hover tooltip (not a side panel
@@ -231,7 +238,10 @@ same rule as the hover tooltip) get a "✏" and are clickable — opens the SAME
 hover tooltip uses (concurrency control included), anchored at the click position, via
 `content/index.tsx`'s `openTmEditor`. See `DECISIONS.md #46` for the full mechanism —
 built by reusing the `Tooltip` component rather than a second implementation in
-`translation-mode.tsx`'s raw-DOM chips.
+`translation-mode.tsx`'s raw-DOM chips. **2026-07-20 stabilization session:** real-org
+testing found the editor opened and immediately closed itself (~1ms) — a genuine
+state-timing bug, root-caused and fixed, see `DECISIONS.md #50`. v4 is now believed
+stable; still needs a real-org click to confirm the fix.
 
 **Future refinement — Translation QA Mode (2026-07-19 product review, ⭐⭐⭐⭐⭐
 potential, the single highest-rated idea in that review):** the pitch is a tester

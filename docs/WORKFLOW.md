@@ -122,6 +122,43 @@ consistency across the doc set, so partial reads are the wrong economy here. End
 same way: `CURRENT_STATE.md` updated to reflect the doc change itself, so the next
 session knows the doc set changed and why.
 
+## Git workflow
+
+The project uses git as of 2026-07-20 (see `DECISIONS.md` for when — `CURRENT_STATE.md`
+always has the current branch situation). `main` is kept stable; real work happens on a
+branch per Epic/fix/refactor, merged back once verified.
+
+**Branch naming** — prefix by session shape:
+- `feature/<name>` — an Epic (session shape 1), e.g. `feature/workspace`,
+  `feature/keyboard-editing-shortcuts`.
+- `bug/<name>` — a bug fix (session shape 2), e.g. `bug/hover-ownership`,
+  `bug/translation-mode-editor`.
+- `refactor/<name>` — an architecture change (session shape 3), e.g.
+  `refactor/hover-state-machine`.
+
+Don't accumulate unrelated changes on one branch — a session that fixes two unrelated
+bugs branches twice, not once, UNLESS the session is explicitly framed as one themed
+unit of stabilization work (e.g. "this session is bug fixes + doc/process cleanup,
+ship it as one PR") — judgment call, but the default is one branch per independent
+change.
+
+**Commits** — one coherent change per commit, message explains *why* over *what* (the
+diff already shows what). No `--no-verify`, no force-push to `main` without the user's
+explicit go-ahead.
+
+**Pull Requests** — every finished branch gets a PR description (even if there's no
+actual GitHub remote yet and it's just presented in-session) covering:
+Summary, Motivation, Architecture, Documentation (which `docs/*.md` files changed),
+Manual Testing (exactly what the user should verify in a real org — this project has
+no way to test against Salesforce itself), Known Issues, Suggested Next Epic (from
+`ROADMAP.md`'s priority table).
+
+**Merging** — the user (Product Owner/QA) decides when a branch is actually
+real-org-verified enough to merge; don't merge on the agent's own initiative without
+that confirmation unless explicitly told to. Prefer `--ff-only` merges to `main` when
+the branch is a direct descendant (keeps history linear); ask before anything that
+would need a merge commit or rebase.
+
 ## How to add a `DECISIONS.md` entry
 
 Append at the bottom, in this exact shape (the index at the top of that file is
