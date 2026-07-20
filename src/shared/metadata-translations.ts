@@ -12,6 +12,7 @@ import {
 } from "./metadata-api";
 import {
   fetchAppLabels,
+  fetchCustomFieldIds,
   fetchEntityLabels,
   fetchFieldLabels,
   fetchQuickActionLabels,
@@ -132,9 +133,10 @@ export async function fetchMetadataTranslationEntries(
     for (const rb of info.relatedListButtons) allObjectApiNames.add(rb.sobject);
   }
 
-  const [entityLabels, fieldLabels, recordTypeLabels, webLinkLabels, quickActionLabels, localizedByLanguageEntries] = await Promise.all([
+  const [entityLabels, fieldLabels, customFieldIds, recordTypeLabels, webLinkLabels, quickActionLabels, localizedByLanguageEntries] = await Promise.all([
     fetchEntityLabels(apiHost, sessionId, [...allObjectApiNames]),
     fetchFieldLabels(apiHost, sessionId, [...allObjectApiNames]),
+    fetchCustomFieldIds(apiHost, sessionId, [...allObjectApiNames]),
     fetchRecordTypeLabels(apiHost, sessionId, [...allObjectApiNames]),
     fetchWebLinkLabels(apiHost, sessionId, [...objectApiNames]),
     fetchQuickActionLabels(apiHost, sessionId, [...objectApiNames]),
@@ -286,6 +288,11 @@ export async function fetchMetadataTranslationEntries(
       dataType: base.dataType,
       valuesByLang: { [BASE_LANG]: base.label },
       customizedLanguages: [],
+      // Custom fields only (see DECISIONS.md #51) — Setup's field-detail route needs
+      // the CustomField's real Id, not its API name; standard fields have no such Id
+      // (they're not in the Tooling API's CustomField sObject at all) and keep using
+      // the API-name route in setupPath, unaffected by this.
+      id: customFieldIds.get(fieldKey),
     };
     for (const lang of activeLanguages) {
       if (lang === BASE_LANG) continue;
