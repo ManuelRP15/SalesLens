@@ -7,12 +7,28 @@
 
 ## Active work
 
-Nothing in progress. No Epic currently open.
+Nothing in progress. `feature/keyboard-editing-shortcuts` branch has the Enter-to-edit
+shortcut complete and ready to merge to `main` (first branch under the new git
+workflow — see below). No Epic currently open.
+
+## Process change (this session)
+
+The project now uses git, with `main` kept stable and work done on
+`feature/`/`bug/`/`refactor/` branches per Epic/fix — previously the codebase had no
+version control at all. The initial commit on `main` is the pre-git snapshot; the
+Enter-to-edit shortcut below is the first branch-based piece of work.
 
 ## What just happened (most recent session)
 
-A batch of hover polish + two new capabilities, self-scoped from the roadmap in one
-sitting (see `DECISIONS.md #44–#48`):
+**PHASE 17: Enter-to-edit keyboard shortcut shipped** (`DECISIONS.md #49`) — Enter opens
+the inline editor on the currently-inspected tooltip's first language row while
+Inspection Mode is on; Ctrl+S (save) and Escape (cancel) turned out to already work
+once an editor is focused, so this closed the one real gap. Arrow-key navigation
+between matches and further hotkey configurability remain open, blocked on PHASE 18's
+match list.
+
+Previous session: a batch of hover polish + two new capabilities, self-scoped from the
+roadmap in one sitting (see `DECISIONS.md #44–#48`):
 - **Hover fine-tuning**: text resolution now checks actual rendered glyph rects, not
   just the DOM box (fixes resolving text the cursor wasn't really over, `#44`); the
   tooltip's non-interactive surface is `pointer-events: none` so it no longer
@@ -46,9 +62,13 @@ concurrency, Inspection Mode) — see `DECISIONS.md #41–#43`.
   `QuickAction`, `LayoutSection`, `RelatedList`) are implemented but explicitly flagged
   "not yet verified against a real org" in `ROADMAP.md` PHASE 4/9 notes.
 
+- Enter-to-edit (PHASE 17, `DECISIONS.md #49`) has not been verified against a real
+  org/keyboard either — same caveat as everything else on this list.
+
 ## Immediate next step
 
-None queued. Explicitly deferred this session (bigger scope, needs either a new UI
-panel or a product judgment call — see `ROADMAP.md`'s status table for the rest):
-PHASE 16 (Workspace/package.xml Builder, **Muy Alta** priority), PHASE 17
-(Keyboard-First), PHASE 18/19 (Translation Navigator, Hover History/Favorites).
+Merge `feature/keyboard-editing-shortcuts` once real-org-tested. After that, next
+candidates (see `ROADMAP.md`'s status table): PHASE 16 (Workspace/package.xml Builder,
+**Muy Alta** priority, large — needs its own dedicated session(s), not a quick add-on),
+the rest of PHASE 17 (arrow-key navigation, blocked on PHASE 18's match list), PHASE
+18/19 (Translation Navigator, Hover History/Favorites).

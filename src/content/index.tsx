@@ -76,6 +76,16 @@ let isEditingActive = false;
  * it is hover-driven.
  */
 let tmEditorOpen = false;
+/**
+ * Args of the currently-shown hover/inspect tooltip (not the Translation Mode click-
+ * editor — that one opens its own editor immediately via autoEditLanguage and has no
+ * use for this). Kept so the Enter-to-edit shortcut (PHASE 17) can re-render the SAME
+ * tooltip with a bumped `editTrigger` without re-resolving anything — the shortcut
+ * only ever acts on what's already being shown, never triggers a new resolution.
+ */
+let lastTooltipArgs: { text: string; x: number; y: number; response: ResolveTextResponse } | null = null;
+/** Bumped on every Enter-to-edit press; see `editTrigger` on Tooltip.tsx for why a counter, not a boolean. */
+let editTriggerCounter = 0;
 
 document.addEventListener(
   "mousemove",
@@ -180,6 +190,16 @@ window.addEventListener(
     }
     if (e.key === "Escape" && tmEditorOpen) {
       closeTmEditor();
+      return;
+    }
+    // Enter-to-edit (PHASE 17): only while Inspection Mode is on AND a tooltip is
+    // actually showing — unlike the inspector/TM toggle keys above, this one stays
+    // silent rather than globally capturing Enter, since Enter is far more likely to
+    // collide with real page behavior (submitting a form, activating a focused
+    // button) than Alt or Escape ever are.
+    if (e.key === "Enter" && !e.repeat && inspectionModeActive && !isEditingActive && lastTooltipArgs && !isTypingInPage()) {
+      e.preventDefault();
+      requestEditShortcut();
       return;
     }
     if (isEnabled && !translationModeEnabled && inspectorHotkey && !e.repeat && matchesInspectorKey(e)) {
@@ -313,6 +333,7 @@ function clearTooltip() {
   currentTooltipText = null;
   tooltipRect = null;
   tmEditorOpen = false;
+  lastTooltipArgs = null;
   ensureHost().render(null);
 }
 
@@ -407,6 +428,7 @@ function closeTmEditor() {
 }
 
 function showTooltip(text: string, x: number, y: number, response: ResolveTextResponse) {
+  lastTooltipArgs = { text, x, y, response };
   ensureHost().render(
     <Tooltip
       text={text}
@@ -420,8 +442,31 @@ function showTooltip(text: string, x: number, y: number, response: ResolveTextRe
         if (!active) reconcileAfterEdit();
       }}
       onRectChange={(rect) => { tooltipRect = rect; }}
+      editTrigger={editTriggerCounter}
     />
   );
+}
+
+/**
+ * True while the user is actually typing into a real page field — a native input/
+ * textarea or a contenteditable, outside our own closed shadow DOM. Guards the
+ * Enter-to-edit shortcut below: Inspection Mode can be toggled on while focus is
+ * still sitting in an unrelated Salesforce field (nothing about entering the mode
+ * moves focus), and this shortcut must never eat that Enter press — e.g. submitting
+ * a search box or inserting a newline in a long-text field the user is mid-typing in.
+ */
+function isTypingInPage(): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el || el === document.body) return false;
+  return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+}
+
+/** Enter-to-edit (PHASE 17): re-shows the currently-inspected tooltip with a bumped `editTrigger`, which Tooltip.tsx's CandidateBlock reacts to by opening its first row's editor. A no-op if there's nothing showing, an edit is already active, or the user is typing elsewhere on the page. */
+function requestEditShortcut() {
+  if (isEditingActive || !inspectionModeActive || !lastTooltipArgs || isTypingInPage()) return;
+  editTriggerCounter++;
+  const { text, x, y, response } = lastTooltipArgs;
+  showTooltip(text, x, y, response);
 }
 
 /**

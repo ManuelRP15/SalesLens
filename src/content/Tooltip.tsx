@@ -33,6 +33,16 @@ interface TooltipProps {
    * click already expressed clear intent to edit that exact language).
    */
   autoEditLanguage?: string;
+  /**
+   * A monotonically increasing counter — each new value (vs. the one seen on the
+   * previous render) is a one-shot "open the editor now" request from a keyboard
+   * shortcut (PHASE 17: Enter while Inspection Mode is on and a tooltip is showing).
+   * A counter rather than a boolean because the tooltip can stay mounted with the
+   * same candidate across repeated presses; a boolean flip back to `false` wouldn't
+   * produce a second edge to react to. No-ops if already editing or the candidate
+   * isn't editable — same silent-no-op philosophy as every other guard in this file.
+   */
+  editTrigger?: number;
 }
 
 /** Copies to the clipboard, falling back to a hidden textarea if the Clipboard API is unavailable/blocked. */
@@ -232,12 +242,14 @@ function CandidateBlock({
   onSaveTranslation,
   onEditingActiveChange,
   autoEditLanguage,
+  editTrigger,
 }: {
   entry: LabelEntry;
   activeLanguages: string[];
   onSaveTranslation?: TooltipProps["onSaveTranslation"];
   onEditingActiveChange?: TooltipProps["onEditingActiveChange"];
   autoEditLanguage?: string;
+  editTrigger?: number;
 }) {
   const colors = TYPE_COLORS[entry.type];
   const editable = isEditableLabelType(entry.type);
@@ -298,6 +310,21 @@ function CandidateBlock({
   useEffect(() => {
     if (autoEditLanguage) startEdit(autoEditLanguage);
   }, []);
+
+  // PHASE 17 keyboard shortcut (Enter while inspecting): opens the FIRST row in
+  // display order, not a "smartest guess" — predictable beats clever for a shortcut
+  // the user will invoke without looking. No-ops (by construction, not by an extra
+  // check) if there's no row to open, an edit is already in progress, or the type
+  // isn't editable at all — `editable` gates `langCodes` itself for non-editable
+  // types via the surrounding component, and `startEdit` is simply never reached.
+  const editTriggerSeenRef = useRef(editTrigger);
+  useEffect(() => {
+    if (editTrigger === undefined || editTrigger === editTriggerSeenRef.current) return;
+    editTriggerSeenRef.current = editTrigger;
+    if (editingLang !== null || !editable) return;
+    const firstLang = langCodes[0];
+    if (firstLang) startEdit(firstLang);
+  }, [editTrigger]);
 
   function cancelEdit() {
     setEditingLang(null);
@@ -425,7 +452,7 @@ function CandidateBlock({
   );
 }
 
-export function Tooltip({ text, x, y, candidates, activeLanguages, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage }: TooltipProps) {
+export function Tooltip({ text, x, y, candidates, activeLanguages, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage, editTrigger }: TooltipProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ left: x + 12, top: y + 16 });
 
@@ -468,6 +495,7 @@ export function Tooltip({ text, x, y, candidates, activeLanguages, onSaveTransla
           onSaveTranslation={onSaveTranslation}
           onEditingActiveChange={onEditingActiveChange}
           autoEditLanguage={autoEditLanguage}
+          editTrigger={editTrigger}
         />
       ))}
     </div>

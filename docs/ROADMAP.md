@@ -25,7 +25,7 @@
 | 14 | Productivity Actions | 🟡 Copy SOQL/XML done, export pending | — |
 | 15 | Dependency Inspector | ⬜ pending | ⚠️ feasibility unconfirmed |
 | 16 | Workspace / Metadata Basket / package.xml Builder | ⬜ pending | **Muy Alta** |
-| 17 | Keyboard-First Experience | ⬜ pending | **Muy Alta** |
+| 17 | Keyboard-First Experience | 🟡 Enter-to-edit shipped; save/cancel already worked; navigation + more hotkey config pending | **Muy Alta** |
 | 18 | Translation Navigator & Page Coverage | ⬜ pending | Alta |
 | 19 | Hover History & Favorites | ⬜ pending | Alta |
 | 20 | Open in VS Code | ⬜ pending | ⚠️ needs a Native Messaging host — architecture decision first |
@@ -456,6 +456,16 @@ What's still open, building on that foundation rather than duplicating it:
   must keep converging on one `inspectAt`-equivalent entry point — new shortcuts
   should call into existing flows (open editor, save, navigate index) rather than
   growing parallel code paths.
+
+### PHASE 17 additions — Enter-to-edit shortcut shipped
+Shipped 2026-07-20. Ctrl+S (save) and Escape (cancel) turned out to already work the
+moment an editor is focused (PHASE 6's `TranslationEditor` already handled both) — the
+only real gap was Enter opening the editor in the first place while Inspection Mode is
+on and a tooltip is showing (no click). See `DECISIONS.md #49` for the mechanism
+(`editTrigger` counter prop) and why it's guarded more narrowly than the existing
+inspector/Translation-Mode toggle keys. Still open: arrow-key navigation between
+matches (blocked on PHASE 18's ordered match list) and further hotkey configurability
+(double-press-to-toggle, configurable grace period).
 
 ### PHASE 18 — Translation Navigator & Page Coverage
 **Alta priority.** Backlog ideas #5 and #6, grouped together because both are
