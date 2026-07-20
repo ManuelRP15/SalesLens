@@ -214,16 +214,20 @@ window.addEventListener(
 // its magnifier cursor) stuck on when focus leaves the page entirely.
 window.addEventListener("blur", exitInspectionMode);
 
-// A click anywhere that isn't the tooltip itself ends Inspection Mode / closes the
-// Translation Mode click-editor — the explicit "I'm done here" signal. Clicks INSIDE
-// the tooltip (Edit, Save, Copy...) must never trigger this: closed-shadow-DOM event
-// retargeting means every click that originates inside it reports shadowHost as
-// e.target here. Because the tooltip's non-interactive surface is pointer-events:none
-// (see tooltip.css), a click on what LOOKS like the tooltip but lands on real page
-// content underneath it correctly reports that real element instead — and correctly
-// counts as "outside" too, since the user just interacted with the actual page.
+// A click OUTSIDE the tooltip's visual bounds ends Inspection Mode / closes the
+// Translation Mode click-editor — the explicit "I'm done here" signal. Product
+// decision (2026-07-20, supersedes lesson #45's tradeoff — see DECISIONS.md #52):
+// the tooltip must persist through a click ANYWHERE inside its visible box, even
+// though the box's non-interactive surface is pointer-events:none (see tooltip.css)
+// and such a click passes through to whatever real page element is visually
+// underneath — including one that reacts to being clicked. Only a click genuinely
+// outside the rendered tooltip, Escape, or re-pressing the toggle key should close
+// it. `isWithinTooltipZone` (coordinate-based, already used by the hover engine) is
+// the right check here, NOT `e.target === shadowHost` alone — that identity check
+// only catches the tooltip's real controls, not its pass-through background.
 document.addEventListener("click", (e) => {
   if (shadowHost && e.target === shadowHost) return;
+  if (isWithinTooltipZone(e.clientX, e.clientY)) return;
   if (inspectionModeActive) exitInspectionMode();
   if (tmEditorOpen) closeTmEditor();
 });
