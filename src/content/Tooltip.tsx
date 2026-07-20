@@ -263,12 +263,19 @@ function CandidateBlock({
   const [localValues, setLocalValues] = useState<Record<string, string> | null>(null);
   const valuesByLang = localValues ?? entry.valuesByLang;
 
-  const [editingLang, setEditingLang] = useState<string | null>(null);
+  // `autoEditLanguage` seeds editingLang/editingBaseline directly in these
+  // initializers (not via a separate mount effect that called startEdit — see
+  // DECISIONS.md #50 for why that was a real bug, not just a style choice): the
+  // very FIRST render must already report "editing" via the effect right below,
+  // or a Translation-Mode-summoned editor gets torn down before it ever shows.
+  const [editingLang, setEditingLang] = useState<string | null>(autoEditLanguage ?? null);
   const [editStatus, setEditStatus] = useState<EditStatus>("idle");
   const [editError, setEditError] = useState<string | undefined>(undefined);
   // The value shown when editing started — the optimistic-concurrency baseline sent
   // to the background, distinct from `value` (what the user has typed since).
-  const [editingBaseline, setEditingBaseline] = useState<string>("");
+  const [editingBaseline, setEditingBaseline] = useState<string>(
+    autoEditLanguage ? entry.valuesByLang[autoEditLanguage] ?? "" : ""
+  );
   const [conflictNotice, setConflictNotice] = useState<string | null>(null);
 
   // Deliberately keyed on editingLang alone: onEditingActiveChange is a stable
@@ -279,6 +286,14 @@ function CandidateBlock({
   // tooltip without going through cancelEdit first) would leave the content script's
   // module-level `isEditingActive` flag stuck `true` forever, permanently blocking
   // clearTooltip() — a real "stuck tooltip" class of bug, not a hypothetical one.
+  //
+  // This effect ALSO reports "not editing" (`false`) on every unmount/mode-change
+  // where editingLang is null — which content/index.tsx's `reconcileAfterEdit`
+  // treats as "the engine isn't live, tear the tooltip down" whenever Translation
+  // Mode is on (its hover engine is never "live" by design). That's exactly why
+  // editingLang must ALREADY be non-null on this component's very first render
+  // when `autoEditLanguage` is set, rather than becoming non-null a render later —
+  // see the useState initializers above.
   useEffect(() => {
     onEditingActiveChange?.(editingLang !== null);
     return () => onEditingActiveChange?.(false);
@@ -302,14 +317,6 @@ function CandidateBlock({
     setEditStatus("idle");
     setEditError(undefined);
   }
-
-  // Mount-once by design: this CandidateBlock instance was created specifically to
-  // open with `autoEditLanguage` already in edit mode (Translation Mode chip click —
-  // see openTmEditor in content/index.tsx, which always forces a fresh mount rather
-  // than updating an existing instance, precisely so this fires every time).
-  useEffect(() => {
-    if (autoEditLanguage) startEdit(autoEditLanguage);
-  }, []);
 
   // PHASE 17 keyboard shortcut (Enter while inspecting): opens the FIRST row in
   // display order, not a "smartest guess" — predictable beats clever for a shortcut
