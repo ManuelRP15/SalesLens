@@ -1,9 +1,14 @@
-import { unzipSync, strFromU8 } from "fflate";
-import { XMLParser } from "fast-xml-parser";
+import { unzipSync, strFromU8, zipSync, strToU8 } from "fflate";
+import { XMLParser, XMLBuilder } from "fast-xml-parser";
 
 const METADATA_API_VERSION = "61.0";
 const RETRIEVE_POLL_INTERVAL_MS = 1500;
 const RETRIEVE_MAX_POLLS = 20;
+// Deploys can genuinely take longer than a small single-file retrieve — a longer
+// interval and higher cap than retrieve's (up to 60s total) rather than reusing the
+// same constants.
+const DEPLOY_POLL_INTERVAL_MS = 2000;
+const DEPLOY_MAX_POLLS = 30;
 
 /** Generic parser for SOAP envelopes: no isArray, we use asArray() where cardinality is ambiguous. */
 const soapXmlParser = new XMLParser({ ignoreAttributes: true, removeNSPrefix: true });
@@ -183,6 +188,176 @@ export async function retrieveMetadataZip(
     console.warn("[STI] retrieveMetadataZip failed:", err);
     return null;
   }
+}
+
+// ── deploy() — the write side. Unlike every retrieve/describe helper in this file,
+// these THROW on failure instead of degrading to null/[] — a save the user explicitly
+// asked for must surface a real error, not vanish silently. background/index.ts's
+// existing try/catch around every SAVE_TRANSLATION already turns a thrown Error into
+// a user-facing message, the same pattern saveCustomLabelTranslation already relies
+// on for the Tooling API write path. ──────────────────────────────────────────────
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  // Chunked to avoid blowing the call-stack argument limit on String.fromCharCode
+  // for a large file — unlikely for a single translation file, but cheap to guard.
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function buildPackageXml(typeName: string, memberFullName: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+  <types>
+    <members>${escapeXml(memberFullName)}</members>
+    <name>${escapeXml(typeName)}</name>
+  </types>
+  <version>${METADATA_API_VERSION}</version>
+</Package>`;
+}
+
+export interface DeployComponentFailure {
+  problem: string;
+  fileName?: string;
+  fullName?: string;
+}
+
+export interface DeployResult {
+  success: boolean;
+  errorMessage?: string;
+  componentFailures: DeployComponentFailure[];
+}
+
+/**
+ * Builds a minimal single-file deploy package (package.xml + the one file, at the
+ * exact folder path Salesforce's own retrieve() already hands back for this type —
+ * not a guessed convention), deploys it, and polls checkDeployStatus() to
+ * completion. `rollbackOnError` + `singlePackage` means this is transactional: a
+ * malformed patch fails the WHOLE deploy with an error, it never partially applies —
+ * the worst case for a bug in the caller's XML patching is a failed save, not
+ * corrupted org metadata.
+ */
+export async function deployMetadataFile(
+  apiHost: string,
+  sessionId: string,
+  typeName: string,
+  memberFullName: string,
+  filePath: string,
+  fileContent: string
+): Promise<DeployResult> {
+  const zipBytes = zipSync({
+    "package.xml": strToU8(buildPackageXml(typeName, memberFullName)),
+    [filePath]: strToU8(fileContent),
+  });
+  const zipBase64 = uint8ArrayToBase64(zipBytes);
+
+  const deployBody = await soapCall(
+    apiHost,
+    sessionId,
+    "deploy",
+    `<deploy><ZipFile>${zipBase64}</ZipFile><DeployOptions><rollbackOnError>true</rollbackOnError>` +
+      `<singlePackage>true</singlePackage></DeployOptions></deploy>`
+  );
+  const id = deployBody?.deployResponse?.result?.id;
+  if (!id) throw new Error("deploy() did not return an async process id");
+
+  for (let attempt = 0; attempt < DEPLOY_MAX_POLLS; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, DEPLOY_POLL_INTERVAL_MS));
+    const statusBody = await soapCall(
+      apiHost,
+      sessionId,
+      "checkDeployStatus",
+      `<checkDeployStatus><asyncProcessId>${escapeXml(id)}</asyncProcessId><includeDetails>true</includeDetails></checkDeployStatus>`
+    );
+    const result = statusBody?.checkDeployStatusResponse?.result;
+    const done = String(result?.done) === "true";
+    if (!done) continue;
+
+    const success = String(result?.success) === "true";
+    const componentFailures = asArray(result?.details?.componentFailures).map((f: any) => ({
+      problem: typeof f?.problem === "string" ? f.problem : "Unknown deploy error",
+      fileName: typeof f?.fileName === "string" ? f.fileName : undefined,
+      fullName: typeof f?.fullName === "string" ? f.fullName : undefined,
+    }));
+    return { success, errorMessage: typeof result?.errorMessage === "string" ? result.errorMessage : undefined, componentFailures };
+  }
+
+  throw new Error("Deploy is taking longer than expected — check Setup > Deployment Status in the org.");
+}
+
+// ── preserveOrder XML AST — used ONLY by the write path (metadata-write.ts). The
+// "friendly object" parser above (translationXmlParser) is lossy by design (that's
+// what makes it pleasant to READ from) and unsuitable for writing back: rebuilding a
+// full file from its friendly-mode parse would risk silently dropping content this
+// project has never needed to understand (validation rules, sharing settings, other
+// fields untouched by this one edit). preserveOrder mode round-trips losslessly —
+// every node keeps its exact position, siblings, and attributes — so a "patch (or
+// insert) exactly one node, leave everything else byte-for-byte" edit is safe. ──────
+
+const preserveOrderParser = new XMLParser({
+  ignoreAttributes: false,
+  preserveOrder: true,
+  removeNSPrefix: true,
+  trimValues: true,
+});
+
+const preserveOrderBuilder = new XMLBuilder({
+  ignoreAttributes: false,
+  preserveOrder: true,
+  format: true,
+  suppressEmptyNode: false,
+});
+
+/** One preserveOrder AST node: `{ tagName: children[] }`, optionally with a `":@"` attributes key, or `{ "#text": string }` for a leaf's text content. */
+export type XmlAstNode = Record<string, unknown>;
+
+export function parseXmlPreserveOrder(xmlText: string): XmlAstNode[] {
+  return preserveOrderParser.parse(xmlText) as XmlAstNode[];
+}
+
+export function buildXmlPreserveOrder(doc: XmlAstNode[]): string {
+  return preserveOrderBuilder.build(doc) as string;
+}
+
+/** The children array of the first `tagName` element directly under `children`, or undefined if there isn't one. */
+export function xmlFirstChild(children: XmlAstNode[] | undefined, tagName: string): XmlAstNode[] | undefined {
+  const found = children?.find((n) => tagName in n);
+  return found ? (found[tagName] as XmlAstNode[]) : undefined;
+}
+
+/** The children arrays of EVERY `tagName` element directly under `children` (for repeatable elements like `<fields>`). */
+export function xmlAllChildren(children: XmlAstNode[] | undefined, tagName: string): XmlAstNode[][] {
+  return (children ?? []).filter((n) => tagName in n).map((n) => n[tagName] as XmlAstNode[]);
+}
+
+/** Reads a leaf element's flat text content, e.g. the "Y" in `<label>Y</label>` given `<label>`'s own children array. */
+export function xmlLeafText(children: XmlAstNode[] | undefined): string | undefined {
+  const textNode = children?.find((n) => "#text" in n);
+  return textNode ? String(textNode["#text"]) : undefined;
+}
+
+/** Patches an existing `tagName` leaf's text in place, or appends a brand new `<tagName>value</tagName>` element if none exists yet. */
+export function xmlSetLeafText(parentChildren: XmlAstNode[], tagName: string, value: string): void {
+  const existing = parentChildren.find((n) => tagName in n);
+  if (existing) {
+    const childArr = existing[tagName] as XmlAstNode[];
+    const textNode = childArr.find((n) => "#text" in n);
+    if (textNode) textNode["#text"] = value;
+    else childArr.push({ "#text": value });
+    return;
+  }
+  parentChildren.push({ [tagName]: [{ "#text": value }] });
+}
+
+/** A minimal, valid, empty document for `rootTag` (e.g. a CustomObjectTranslation file for an object+language pair that has never had one before) — safe because it only ever gets ADDED to, never merged with unfamiliar existing content. */
+export function freshXmlDocument(rootTag: string): XmlAstNode[] {
+  return [
+    { "?xml": [], ":@": { "@_version": "1.0", "@_encoding": "UTF-8" } },
+    { [rootTag]: [], ":@": { "@_xmlns": "http://soap.sforce.com/2006/04/metadata" } },
+  ];
 }
 
 // ── Extraction of translation file content ──────────────────────────────────

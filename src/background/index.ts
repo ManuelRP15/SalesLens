@@ -2,6 +2,7 @@ import { buildReverseIndex, resolveText, type ReverseIndex } from "../shared/ind
 import { MOCK_LABEL_ENTRIES } from "../shared/mock-data";
 import { fetchAllTranslations, saveCustomLabelTranslation, toApiHost } from "../shared/salesforce-api";
 import { fetchMetadataTranslationEntries } from "../shared/metadata-translations";
+import { saveMetadataTranslation } from "../shared/metadata-write";
 import { isEditableLabelType } from "../shared/types";
 import type {
   ResolveTextRequest,
@@ -122,11 +123,14 @@ async function loadLabels(pageOrigin: string, pageObjectApiName: string | null |
 }
 
 /**
- * PHASE 6: persists one language's edited value for a CustomLabel (the only editable
- * type today, see isEditableLabelType) and folds the change back into the live index —
- * same setIndexFromRealData path a full refresh uses, so the reverse index, the
- * persisted cache, and Translation Health all pick up the edit immediately, with no
- * separate "apply this one edit" logic to keep in sync.
+ * PHASE 6/6b: persists one language's edited value for any editable type (see
+ * isEditableLabelType) and folds the change back into the live index — same
+ * setIndexFromRealData path a full refresh uses, so the reverse index, the persisted
+ * cache, and Translation Health all pick up the edit immediately, with no separate
+ * "apply this one edit" logic to keep in sync. Two write mechanisms share this one
+ * function: CustomLabel goes through the Tooling API (saveCustomLabelTranslation,
+ * fast, synchronous PATCH/POST); everything else goes through a Metadata API deploy()
+ * (saveMetadataTranslation, slower, retrieve-then-deploy) — see DECISIONS.md #53.
  */
 async function saveTranslation(req: SaveTranslationRequest): Promise<SaveTranslationResponse> {
   if (!isEditableLabelType(req.labelType)) {
@@ -144,7 +148,10 @@ async function saveTranslation(req: SaveTranslationRequest): Promise<SaveTransla
   }
 
   try {
-    const result = await saveCustomLabelTranslation(apiHost, sessionId, entry, req.language, req.value, req.expectedValue);
+    const result =
+      req.labelType === "CustomLabel"
+        ? await saveCustomLabelTranslation(apiHost, sessionId, entry, req.language, req.value, req.expectedValue)
+        : await saveMetadataTranslation(apiHost, sessionId, entry, req.language, req.value, req.expectedValue);
 
     if (result.conflict) {
       // Someone else changed this language since the editor opened — the write never

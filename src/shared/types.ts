@@ -55,15 +55,29 @@ export interface LabelEntry {
 }
 
 /**
- * Types with a real, direct write path today (PHASE 6): CustomLabel translations live
- * on standalone Tooling API records (ExternalString/ExternalStringLocalization) that
- * can be PATCHed/POSTed individually. Every other type's translation lives inside a
- * CustomObjectTranslation (or similar) XML file, only reachable via a Metadata API
- * deploy() of a re-zipped package — a materially different, unbuilt pipeline. Don't
- * add a type here until that pipeline exists; the tooltip's edit affordance is gated
- * on this set so it never offers an edit action it can't actually fulfill.
+ * Types with a real, direct write path (PHASE 6/6b — see DECISIONS.md #53). Two
+ * different write mechanisms share this one gate: CustomLabel's translations are
+ * standalone Tooling API records (PATCH/POST, salesforce-api.ts's
+ * saveCustomLabelTranslation); every other type here lives inside a
+ * CustomObjectTranslation/Translations/GlobalValueSetTranslation XML file, written via
+ * a Metadata API deploy() (metadata-write.ts's saveMetadataTranslation). Deliberately
+ * excludes ObjectLabel/RelatedList (their target, `<caseValues>`, can hold multiple
+ * grammatical-case entries for gendered languages — not yet safely patchable) and
+ * StandardButton/StandardTab (Salesforce's own platform-controlled translations — no
+ * admin-authored value exists to write back to, ever). The tooltip's edit affordance
+ * is gated on this set so it never offers an edit action it can't actually fulfill.
  */
-const EDITABLE_LABEL_TYPES: ReadonlySet<LabelType> = new Set(["CustomLabel"]);
+const EDITABLE_LABEL_TYPES: ReadonlySet<LabelType> = new Set([
+  "CustomLabel",
+  "FieldLabel",
+  "RecordType",
+  "WebLink",
+  "QuickAction",
+  "LayoutSection",
+  "PicklistValue",
+  "CustomTab",
+  "CustomApplication",
+]);
 
 export function isEditableLabelType(type: LabelType): boolean {
   return EDITABLE_LABEL_TYPES.has(type);
