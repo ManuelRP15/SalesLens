@@ -1,0 +1,293 @@
+:host { all: initial; }
+
+.sti-tooltip {
+  position: fixed;
+  z-index: 2147483647;
+  /* width:max-content is critical: a fixed-position box with auto width
+     SHRINKS to fit the space left of the viewport edge, which near the right
+     edge produced a 1-word-per-line sliver AND made the clamping logic measure
+     that deformed box (lesson #39). max-content keeps the natural size stable
+     regardless of position; the clamp then moves it fully on screen. */
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+  font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.4;
+  background: #ffffff;
+  color: #16325c;
+  border: 1px solid #d8dde6;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(22, 50, 92, 0.18);
+  padding: 10px 12px;
+  /* pointer-events:none on the box itself, restored to "auto" only on the actual
+     interactive controls below (buttons, the edit textarea). This is what lets the
+     cursor "see through" the tooltip's background to whatever real page element it
+     happens to be covering — elementFromPoint skips pointer-events:none elements
+     entirely — instead of that content being permanently unreachable until the user
+     clicks outside/Escape to reset. Only the controls someone actually needs to click
+     stay solid; everything else is informational and was never meant to block the
+     page underneath it. See content/index.tsx's hover-ownership zone for the other
+     half of this: an exact match against the closed shadow host (only reachable via
+     one of the "auto" elements below) still means "stay pinned to the tooltip." */
+  pointer-events: none;
+}
+
+.sti-tooltip__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.sti-candidate {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-left: 3px solid #d8dde6;
+  background: #f9fafb;
+  border-radius: 0 4px 4px 0;
+}
+
+.sti-candidate + .sti-candidate {
+  margin-top: 6px;
+}
+
+.sti-candidate__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 5px;
+}
+
+.sti-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sti-badge__setup-hint {
+  opacity: 0.6;
+  font-weight: 400;
+}
+
+.sti-tooltip__apiname {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  color: #444;
+  word-break: break-all;
+}
+
+.sti-tooltip__unknown {
+  color: #a06400;
+  font-style: italic;
+  font-size: 11px;
+}
+
+.sti-tooltip__translations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.sti-tooltip__translations li {
+  display: grid;
+  grid-template-columns: 10px 50px 1fr auto;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.sti-lang-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  align-self: center;
+}
+
+.sti-lang-code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  color: #706e6b;
+}
+
+.sti-lang-value { word-break: break-word; }
+
+.sti-lang-value--empty {
+  color: #a19f9d;
+  font-style: italic;
+}
+
+.sti-lang-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.sti-customized-mark {
+  color: #7c3aed;
+  font-size: 10px;
+  margin-left: 3px;
+  cursor: help;
+}
+
+.sti-field-type {
+  font-size: 10px;
+  color: #706e6b;
+  background: #eef1f6;
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.sti-copy-btn {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1a56db;
+  background: #eef3fd;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  /* The tooltip box itself is pointer-events:none (see .sti-tooltip) — every actual
+     control needs this restored individually or it becomes unclickable too. */
+  pointer-events: auto;
+}
+
+.sti-copy-btn:hover {
+  background: #dbe7fb;
+}
+
+.sti-copy-small-btn {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #706e6b;
+  background: #f3f2f2;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  padding: 2px 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.sti-copy-small-btn:hover {
+  background: #e5e5e5;
+  color: #16325c;
+}
+
+.sti-copy-icon-btn {
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: #1a56db;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0.55;
+  pointer-events: auto;
+}
+
+.sti-copy-icon-btn:hover {
+  opacity: 1;
+  background: #eef3fd;
+}
+
+/* Inline translation editor (PHASE 6) — replaces a row's value+actions columns
+   (grid-column 3/-1) while keeping the language dot/code visible as context. */
+.sti-edit-wrap {
+  grid-column: 3 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sti-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #16325c;
+  background: #fff;
+  border: 1px solid #1a56db;
+  border-radius: 4px;
+  padding: 3px 6px;
+  outline: none;
+  pointer-events: auto;
+}
+
+.sti-edit-input:disabled {
+  opacity: 0.6;
+}
+
+.sti-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sti-edit-save,
+.sti-edit-cancel {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.sti-edit-save {
+  color: #fff;
+  background: #1a56db;
+}
+
+.sti-edit-save:hover:not(:disabled) {
+  background: #143fa6;
+}
+
+.sti-edit-cancel {
+  color: #444;
+  background: #eef1f6;
+}
+
+.sti-edit-cancel:hover:not(:disabled) {
+  background: #e1e5ec;
+}
+
+.sti-edit-save:disabled,
+.sti-edit-cancel:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.sti-edit-error {
+  font-size: 10px;
+  color: #c0392b;
+}
+
+.sti-conflict-notice {
+  font-size: 10.5px;
+  color: #a06400;
+  background: #fdf3e3;
+  border: 1px solid #f0d8a8;
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin-bottom: 5px;
+}
