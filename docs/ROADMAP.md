@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 4 | Tooltip productivity actions + reliability | ✅ done | — |
 | 5 | Navigation to Setup | ✅ done (CustomLabel URL + custom-field Id-based URL both unverified) | — |
-| 6 | Inline translation editing | 🟡 v1 done (Custom Labels only) | 6b (other types) needs a deploy() pipeline first |
+| 6 | Inline translation editing | ✅ v1 (Custom Labels) + 6b (8 more types via deploy()) done | 6c (ObjectLabel/RelatedList caseValues) pending |
 | 7 | Standard labels without Translation Workbench | ✅ done | — |
 | 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done, Lens pending | — |
 | 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing) | — |
@@ -74,7 +74,7 @@ fields are unchanged. **The custom-field Id-based route is also NOT yet verified
 against a real org** — confirm it the same way the CustomLabel URL still needs
 confirming.
 
-### PHASE 6 — In-place translation editing (Inline Translation Editing) — v1 done, Custom Labels only
+### PHASE 6 — In-place translation editing (Inline Translation Editing) — v1 (Custom Labels) + 6b (8 more types) done
 Shipped 2026-07-20 as an inline editor inside the existing hover tooltip (not a side panel
 or modal — that original idea was superseded by something more directly integrated into
 the flow): a "✏" button per language row swaps it for an auto-focused, auto-growing
@@ -90,14 +90,21 @@ writing and aborts instead of overwriting if it no longer matches what the edito
 from, surfacing the real current value in the UI instead of silently clobbering a
 concurrent change.
 
-**Deliberately NOT in this v1, scoped out by explicit product decision (lesson #41):**
-editing Field/Object/Picklist/RecordType/Tab/etc. labels — their translations live inside
-`CustomObjectTranslation`/`Translations`/`GlobalValueSetTranslation` XML files (lesson #6),
-only writable via a Metadata API `deploy()` of a re-zipped package (fetch → patch one value
-→ re-zip → base64 → `deploy()` → poll `checkDeployStatus` → handle partial failures) — a
-materially different, unbuilt pipeline, not a bigger version of the same PATCH call. This is
-real, scoped future work, not an oversight — track it as a distinct sub-phase (call it
-PHASE 6b when it's picked up) rather than folding it into this section's "done" status.
+**PHASE 6b (2026-07-21): the deploy() pipeline scoped out of v1 is now built.**
+`FieldLabel`, `RecordType`, `WebLink`, `QuickAction`, `LayoutSection`, `PicklistValue`
+(both field-scoped and global-value-set), `CustomTab`, `CustomApplication` are all
+editable through the exact same tooltip editor now, via a new write path
+(`metadata-write.ts`'s `saveMetadataTranslation`) that retrieves the one relevant XML
+file, patches or inserts the target node using a lossless `preserveOrder` XML
+round-trip, and deploys it — full design, the sibling-unlock (lesson #15) correctness
+requirement, and the safety reasoning behind every non-obvious choice are in
+`DECISIONS.md #53`. **Two types stay deferred (`ObjectLabel`, `RelatedList` — their
+target, `<caseValues>`, needs safe multi-grammatical-case handling first — tracked as
+PHASE 6c) and two are PERMANENTLY non-editable (`StandardButton`, `StandardTab` —
+Salesforce's own platform-controlled translations, not admin-authored content).**
+**Real-org UNVERIFIED** — this is a genuine metadata write, confirm on a sandbox org
+before trusting it broadly.
+
 Also not in this v1: real-time on-page text replacement after saving (the original spec's
 "live preview") — skipped because editing usually targets a language OTHER than the one
 currently rendered on screen, so there's often no matching on-page text to replace at all,
@@ -111,6 +118,7 @@ instead — see "What works" above.
 - **Pre-save validation**: length limits, special-character/encoding checks, and duplicate-value warnings before the PATCH/POST fires — client-side only, no new API calls; needs the field's actual length constraint (already queryable via `FieldDefinition`, same source as the PHASE 8 Metadata Lens length column) rather than a guessed limit.
 - **Smart Suggestions (bulk apply)**: when the same source value is being edited and the reverse index shows the identical string used as the base value for other entries too, offer "the same translation exists in N other places — apply the same edit there?" as a single-step confirmation, never an automatic bulk edit; only offered across entries of the same `LabelType`+language, to avoid conflating unrelated metadata that merely collides in text (the same discipline as lesson #30's collision handling).
 - **Undo**: this phase's own per-edit undo is superseded by the org-aware **Safe Undo** mechanism in PHASE 16 (Workspace) — don't build a separate local-only undo here; the editor should record every edit into the Workspace as it happens, and Undo is offered from there.
+- **PHASE 6c — `ObjectLabel`/`RelatedList` editing** (added 2026-07-21, deferred out of PHASE 6b): needs a safe patch-or-refuse strategy for `<caseValues>` when a language has multiple grammatical-case entries (German, Slavic...) — `FieldLabel`/`RecordType` already refuse cleanly via `assertNoGenderedCase` (`metadata-write.ts`) rather than risk corrupting the other cases; the object's own label needs the equivalent, then `RelatedList` (whose displayed value is derived from the same node one hop removed) can ride on it. Not urgent — no real-org pressure for it yet, unlike the 8 types PHASE 6b just shipped.
 
 ### PHASE 7 — Standard object/field labels without Translation Workbench (done)
 Originally scoped as "out of scope entirely" — wrong. Real-org feedback ("standard fields always show Unknown Origin") forced a proper investigation, and there IS a metadata-driven source that works regardless of whether Translation Workbench/Rename Tabs and Labels has ever been touched: the **Partner API's `describeSObjects()` call with a `LocaleOptions` header** (`src/shared/describe-api.ts`) — this returns object/field/picklist-value labels translated into ANY language via Salesforce's own out-of-the-box professional translations, independent of the running user's own language and independent of any admin customization. See lessons #16, #21 and #25 below for the full mechanism, the endpoint bug that blocked it entirely until 2026-07-19, and how it combines with the `CustomObjectTranslation`-derived admin overrides from PHASE 4.
