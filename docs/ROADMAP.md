@@ -30,7 +30,7 @@ marked "done" before 2026-07-21 is off by default without checking.
 | 7 | Standard labels without Translation Workbench | ✅ done | — |
 | 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done (advanced types opt-in), Lens pending | — |
 | 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing; advanced-type badges opt-in); missing/identical-to-source chip signals shipped 2026-07-21 (DECISIONS.md #58) | rest of QA Mode refinement (longer-term Screen Flows) pending |
-| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); **Duplicated-value detection shipped 2026-07-21 (DECISIONS.md #64)**; rest of QA Report v2 (Broken/Terminology) pending — needs real bad-data examples first | — |
+| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); rest of QA Report v2 (Duplicated/Broken/Terminology) pending | — |
 | 11 | Language config UI + Quick Compare | 🟡 Quick Compare shipped 2026-07-21 (DECISIONS.md #59, closes PRODUCT.md MVP capability #2); language order/colors/icons/profiles still pending | — |
 | 12 | Advanced Metadata Inspector | ⬜ pending | — |
 | 13 | Smart Search | ⬜ pending | — |
@@ -320,13 +320,8 @@ opened via `chrome.tabs.create` rather than referenced directly in the manifest.
 
 **Future refinement — QA / Localization Report v2 (2026-07-19 product review,
 ⭐⭐⭐⭐⭐ potential):** extend the current per-language missing-count table with:
-- ✅ **Duplicated** detection — **shipped 2026-07-21 (`DECISIONS.md #64`)**: the same
-  translated value used by two or more different elements in the same language, a common
-  copy-paste mistake. Pure `computeDuplicateClusters` (`shared/duplicate-detection.ts`,
-  15 unit tests), surfaced as a "Duplicated" count column + per-language cluster detail in
-  the Health page. Base language excluded, empty excluded, Simple-Mode scoped, no new
-  toggle. The per-page Translation-Audit *Duplicated filter* (PHASE 18) stays deferred —
-  this detection is what makes the real-org cluster review it was waiting on possible.
+- **Duplicated** detection: the same translated value used for two different
+  `apiName`s in the same language, a common copy-paste mistake worth flagging.
 - **Broken** detection: values containing leftover merge-field syntax, unresolved
   placeholders, or obviously truncated text — needs a concrete definition of "broken"
   before implementation; don't guess at a heuristic without real bad-data examples
