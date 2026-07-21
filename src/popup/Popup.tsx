@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { langAccent } from "../content/tooltip-constants";
-import { DEFAULT_INSPECTOR_HOTKEY, DEFAULT_TM_HOTKEY, type Settings, type TmPreset } from "../shared/types";
+import { DEFAULT_HOLD_HOTKEY, DEFAULT_INSPECTOR_HOTKEY, DEFAULT_TM_HOTKEY, type Settings, type TmPreset } from "../shared/types";
 
 // NOTE: no flag emoji anywhere — Chrome on Windows renders 🇪🇸 as the letters
 // "ES". The language marker is the same colored dot used by the tooltip and
@@ -121,6 +121,13 @@ export function Popup() {
     chrome.storage.local.set({ settings: next });
   }
 
+  function toggleSimpleMode() {
+    if (!settings) return;
+    const next = { ...settings, simpleMode: !settings.simpleMode };
+    setSettings(next);
+    chrome.storage.local.set({ settings: next });
+  }
+
   function toggleTranslationMode() {
     if (!settings) return;
     const next = { ...settings, translationModeEnabled: !settings.translationModeEnabled };
@@ -185,10 +192,34 @@ export function Popup() {
       <div style={{ fontSize: 11, color: "#706e6b", marginBottom: 14, marginTop: -8 }}>
         {settings.enabled
           ? settings.inspectorHotkey
-            ? `Press ${settings.inspectorHotkey} to enter Inspection Mode (magnifier cursor), then hover freely — no need to hold it down. Press it again, Esc, or click outside the tooltip to exit.`
+            ? `Press ${settings.inspectorHotkey} to pin a tooltip on whatever's under the cursor — it stays put, even as you move the mouse. ${
+                settings.holdHotkey ? `Hold ${settings.holdHotkey} to move it elsewhere. ` : ""
+              }Esc, click outside, or press ${settings.inspectorHotkey} again to close it.`
             : "Hover over any text on the page to see its origin."
           : "Enable it, then hover over any text on the page."}
       </div>
+
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          fontSize: 12,
+          padding: "6px 8px",
+          marginBottom: 14,
+          borderRadius: 6,
+          background: "#fafaf9",
+          border: "1px solid #e5e5e5",
+          cursor: "pointer",
+        }}
+        title="Advanced types (buttons, quick actions, tabs, apps, record types, layout sections) stay fully built — this just keeps them out of the way until you need them."
+      >
+        <input type="checkbox" checked={settings.simpleMode} onChange={toggleSimpleMode} />
+        <span>
+          <strong>Simple mode</strong>
+          <span style={{ color: "#706e6b" }}> — only objects, fields, picklists &amp; labels</span>
+        </span>
+      </label>
 
       <button
         onClick={toggleTranslationMode}
@@ -299,6 +330,28 @@ export function Popup() {
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "4px 0 2px" }}>
+          <span style={{ fontSize: 12 }} title="Hold this key to move the pinned tooltip to whatever's under the cursor while held — release to pin it there. Independent of Inspection Mode; works even while a tooltip is already open.">
+            Hold to move tooltip
+          </span>
+          <span style={{ display: "flex", gap: 4 }}>
+            <HotkeyRecorder
+              value={settings.holdHotkey}
+              bareKey
+              onChange={(next) => updateTmSetting({ holdHotkey: next })}
+            />
+            {settings.holdHotkey && (
+              <button
+                type="button"
+                title="Disable — the pinned tooltip can then only be closed (Esc/click outside), never moved"
+                onClick={() => updateTmSetting({ holdHotkey: null })}
+                style={{ background: "none", border: "none", fontSize: 10, color: "#706e6b", cursor: "pointer", padding: 0 }}
+              >
+                Off
+              </button>
+            )}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "4px 0 2px" }}>
           <span style={{ fontSize: 12 }}>Toggle Translate all</span>
           <HotkeyRecorder
             value={settings.tmHotkey}
@@ -308,7 +361,13 @@ export function Popup() {
         </div>
         <button
           type="button"
-          onClick={() => updateTmSetting({ inspectorHotkey: DEFAULT_INSPECTOR_HOTKEY, tmHotkey: DEFAULT_TM_HOTKEY })}
+          onClick={() =>
+            updateTmSetting({
+              inspectorHotkey: DEFAULT_INSPECTOR_HOTKEY,
+              holdHotkey: DEFAULT_HOLD_HOTKEY,
+              tmHotkey: DEFAULT_TM_HOTKEY,
+            })
+          }
           style={{ background: "none", border: "none", fontSize: 10, color: "#1a56db", cursor: "pointer", padding: "4px 0 0", display: "block" }}
         >
           Reset shortcuts to defaults
