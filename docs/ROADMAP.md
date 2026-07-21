@@ -38,7 +38,7 @@ marked "done" before 2026-07-21 is off by default without checking.
 | 15 | Dependency Inspector | ⬜ pending | ⚠️ feasibility unconfirmed |
 | 16 | Workspace / Metadata Basket / package.xml Builder | ⬜ pending | **Muy Alta** |
 | 17 | Keyboard-First Experience | 🟡 Enter-to-edit shipped; save/cancel already worked; hold-vs-toggle hover redesign shipped 2026-07-21 (DECISIONS.md #56); shortcut settings UX simplified + mutual conflict prevention shipped 2026-07-21 (DECISIONS.md #57); arrow-key navigation still pending | **Muy Alta** |
-| 18 | Translation Navigator & Page Coverage | ⬜ pending | Alta |
+| 18 | Translation Audit & Guided Navigation ("Translate All" evolution, absorbs the old "Translation Navigator") | 🟡 v1 shipped 2026-07-21 (`#60`); first real-org bug round fixed same day (`#61`): sticky-header scroll correction, editor-closes-on-click root cause (Dynamic Hover parity), Complete-tab overflow, session-local translation scope toggle (All fields/Current only) | Duplicated filter designed but deferred (needs its own real-org check); Page Coverage stat line folded into the panel header instead of a separate feature |
 | 19 | Hover History & Favorites | ⬜ pending | Alta |
 | 20 | Open in VS Code | ⬜ pending | ⚠️ needs a Native Messaging host — architecture decision first |
 | 21 | Team Mode | ⬜ pending | ⚠️ needs a shared backend — architecture decision first |
@@ -570,24 +570,227 @@ the attempt inline with an explanation, and `pickAvailableBareKey` picks a safe
 alternate when a shortcut is re-enabled and its own default would collide with the
 other's current custom key.
 
-### PHASE 18 — Translation Navigator & Page Coverage
-**Alta priority.** Backlog ideas #5 and #6, grouped together because both are
-read-only, whole-page analyses built on the exact same scan the extension already
-performs.
+### PHASE 18 — Translation Audit & Guided Navigation ("Translate All" evolution)
+**Shipped v1, 2026-07-21 (`DECISIONS.md #60`).** Originally scoped (backlog ideas #5/#6)
+as a read-only "Translation Navigator" list + separate "Page Coverage" stats panel.
+Superseded by a richer, directly-requested vision: evolve "Translate All" (Translation
+Mode, PHASE 9) from a display+edit mode into a full **audit and guided-fixing
+workflow** — filter to what needs attention, step through issues one at a time, watch
+the page scroll to and highlight each one, fix it with the existing editor, watch the
+count go down, repeat. The two original backlog ideas are still in here, just folded
+into the richer feature rather than built as their own separate panel: the list view
+IS the Navigator, and a coverage summary lives in the panel's header instead of a
+second UI.
 
-**Translation Navigator:** a panel listing every translatable text detected on the
-current page (type, status, current value), reusing the full-tree scan
-(`collectTranslatableTargets`) and bulk resolution (`RESOLVE_TEXTS_BULK`) already
-built for Translation Mode (PHASE 9) — no new scanning or matching logic, just a list
-UI over the same result set. Selecting an item scrolls it into view, highlights it,
-and opens the tooltip — useful as a QA entry point independent of hovering.
+**Why this, now:** the single highest-value remaining CORE capability after Quick
+Compare (`#59`) closed MVP capability #2. Unlike net-new panels (Smart Search,
+Workspace), this is a direct extension of Translation Mode — the exact scan
+(`collectTranslatableTargets` + `RESOLVE_TEXTS_BULK`) and the exact editor
+(`Tooltip.tsx`'s `CandidateBlock`, via `openTmEditor`) it already uses, plus the
+missing/identical signals already built for `#58`/`#59`. No new metadata fetches, no
+second editor, no competing state machine — see Technical architecture below for why
+each of these was a reuse rather than a new build.
 
-**Translation Coverage:** page-level statistics computed from that same scan result —
-total texts detected, translated / untranslated / falling back to source / unresolved
-("Unknown origin") counts for the current screen. This is a per-page companion to
-PHASE 10's org-wide Translation Health, not a replacement for it — Health answers
-"what's missing across the org for my active languages," Coverage answers "how
-well-translated is the exact screen I'm looking at right now."
+**Product goal:** open Translate All, immediately see which translations need
+attention across the whole page (not just what's scrolled into view), filter to one
+category, step through issues one by one with the page doing the scrolling/
+highlighting for you, fix each with the same inline editor Translation Mode chips
+already use, and watch the count shrink in real time — a guided audit, not manual
+hunting.
+
+**User flow:** Toggle Translate All on (popup button or `tmHotkey`) → a collapsed
+counts pill appears bottom-right → expand it → pick a filter tab (All / Missing /
+Identical / Complete) → the current filtered list and a "N of M" stepper appear →
+click Next (or a list row) → the page scrolls the target into view and highlights it →
+if the entry is editable, the SAME inline editor opens automatically, seeded on the
+specific language that made the entry match the filter → save → the panel's counts
+update immediately (no manual rescan) → click Next again → repeat until the filtered
+list is empty.
+
+**Technical architecture (the 7 questions from the session brief, answered from
+reading the actual code, not assumed):**
+1. **Current Translate All architecture:** `content/translation-mode.tsx`'s
+   `scan()` walks the page (`collectTranslatableTargets`, NOT viewport-gated — it
+   measures `getBoundingClientRect().width/height > 0`, so below-the-fold content is
+   already included), resolves everything in one `RESOLVE_TEXTS_BULK` round trip, and
+   injects an inline chip badge per matched element. Re-scans on a debounced
+   `MutationObserver` (page DOM changes) and whenever `startTranslationMode()` is
+   called again while already running (already-existing "just rescan" branch).
+2. **How translations are discovered:** the SAME resolution pipeline as hover
+   (`resolveText`/`applySimpleScope` in `background/index.ts`) — Simple Mode scoping,
+   the reverse index, everything already applies with zero new code.
+3. **DOM ↔ translation mapping:** `scan()` already produces `{element, entry}` pairs
+   for every matched text on the page — this is the exact mapping "go to this issue"
+   needs. It just wasn't kept around past building the badge; v1 keeps it.
+4. **Reliably computable states:** per active language, an entry is `missing` (no
+   value at all — same check as `#58`/`#59`), `identical` (byte-equal to the
+   base-language value — same check, same `flagIdenticalTranslations` gate), or
+   neither. One entry can be missing in one language and identical in another; v1
+   assigns ONE overall status per entry for filtering, in priority order
+   `missing > identical > complete` (missing is strictly more actionable).
+   **Duplicated is reliably computable too** (see "Duplicates" below) but shipped
+   as a designed-not-built extension, not v1 — see Deferred.
+5. **Reusing scroll/highlight:** `Element.scrollIntoView({behavior:"smooth",
+   block:"center"})` needs nothing new from the DOM layer; a new small highlight
+   overlay (see Highlighting strategy) is the only new mechanism, and it's
+   independent of resolution/DOM-mapping entirely.
+6. **Reusing the editor:** `content/index.tsx`'s `openTmEditor(entry, language, x, y)`
+   already opens `Tooltip.tsx`'s full editor (concurrency control, keyboard
+   shortcuts, conflict banner) anchored at an (x, y) point — guided navigation just
+   needs to compute an (x, y) from the target element's own rect instead of a real
+   click event. Zero new editor code.
+7. **Hover / Inspection Mode interaction:** already fully decoupled — the hover
+   engine's `isEngineLive()` already returns `false` whenever `translationModeEnabled`
+   is true, so Inspection Mode and the audit panel can never contend for the tooltip.
+   No new mutual-exclusion logic needed.
+
+**State model:** `translation-mode.tsx`'s `scan()` now ALSO builds a de-duplicated
+(`apiName + type` key — the same logical entry can appear at multiple DOM locations;
+v1 tracks the first-encountered element as the navigation target) list of
+`AuditEntry { key, entry, element, missingLanguages, identicalLanguages, editable,
+status }`, handed to `content/index.tsx` via a new `onAuditUpdate` callback parameter
+on `startTranslationMode()` — the exact same "one scan, several consumers" shape the
+badges themselves already use, not a parallel scan. `content/index.tsx` owns the
+panel's own UI state (current filter, current index within the filtered list, expanded/
+collapsed) as module-level variables, mirroring how every other piece of hover/TM state
+already lives there.
+
+**Filtering approach:** four tabs — **All, Missing, Identical, Complete** — deliberately
+NOT the larger set floated in the brief (a "Needs attention" union tab was considered
+and dropped: it adds a tab without adding information, since Missing/Identical are
+already individually selectable, and Duplicated isn't shipped yet to fold in). Each tab
+maps directly to a real, already-computed status — no synthetic buckets.
+
+**Navigation approach:** a "`{Filter} — i of N`" stepper + Prev/Next, plus a scrollable
+list of the current filter's entries (type badge + API name + status), click any row to
+jump straight to it. The "current position" is an index into the CURRENT filtered
+array — after a save changes that array's length (an entry drops out of "Missing" once
+fixed), the index is clamped to the new length. This means the item that occupied the
+NEXT slot becomes "current" for free, with no explicit "auto-advance" logic — matches
+the brief's own worked example (`Missing: 12 → edit one → Missing: 11`) without the
+panel yanking the page away from a user who might still be reading the result.
+
+**DOM mapping strategy:** covered under Technical architecture point 3 — the
+`{element, entry}` pairs `scan()` already builds are the ONLY mapping needed; v1 adds
+no second lookup structure.
+
+**Highlighting strategy:** a single floating overlay `<div>` (`position:fixed`,
+`pointer-events:none`, injected directly into `document.documentElement` — the SAME
+"transient, fully-reversible page DOM touch" exception Translation Mode's badges and
+the Inspection Mode magnifier cursor already use, not a new kind of exception),
+repositioned via the target's live `getBoundingClientRect()` on scroll/resize, with a
+brief pulse animation on activation settling into a steady outline. Only ONE highlight
+exists at a time (a new `highlightElement()` call clears the previous one first) — the
+overlap problem that killed Translation Mode's OWN v1 (dozens of simultaneous floating
+cards, `#19`) doesn't apply here, since guided navigation only ever highlights the ONE
+entry currently being worked on.
+
+**Editing integration:** the existing `openTmEditor`/`Tooltip.tsx` editor is the ONLY
+editor — guided navigation computes an anchor point from the target element's own
+`getBoundingClientRect()` (not a real click event) and calls the exact same function a
+chip click would. For a `missing` entry, the editor opens pre-seeded on the SPECIFIC
+missing language (not just the first one) — the language that made the entry match the
+filter in the first place. Non-editable entries (standard fields/picklists,
+`ObjectLabel` — see `DECISIONS.md #56`'s narrowing) still scroll/highlight so the user
+can SEE the gap, but no editor auto-opens — there's nothing to write back to yet.
+
+**Concurrency considerations:** unchanged — `saveTranslation`'s existing optimistic-
+concurrency flow (`#42`, re-read-before-write, conflict banner) is untouched; guided
+navigation is purely a new ENTRY POINT into the same save path, not a new one. What's
+new: a successful save now triggers an explicit Translation Mode rescan (calling
+`startTranslationMode()` again with the same args — already a safe no-op-if-already-
+running "just rescan" path) so the panel's counts/list update immediately. This closes
+a real, previously-unnoticed gap: an edit happens inside the extension's own CLOSED
+shadow root, so the page-level `MutationObserver` that normally re-triggers a rescan
+never fires from it — without this explicit trigger, a saved edit would leave the
+on-page badge AND the audit panel stale until some unrelated page mutation happened to
+retrigger a scan.
+
+**Known Salesforce limitations:**
+- Same "no automated real-org testing" limitation as everything else in this
+  codebase — this is a genuine interaction-heavy feature (scroll timing, highlight
+  positioning across Lightning's nested/shadow layouts) that needs a real click-through
+  more than most.
+- `scrollIntoView`'s "smooth" behavior has no completion callback, and (found in real-
+  org testing, fixed in `#61` — see the additions section below) can't be trusted
+  alone against Salesforce's pinned/sticky headers and nested scroll containers either.
+  A verify-and-correct pass now runs after it should have settled.
+- The de-duplication key (`apiName + type`) means only the FIRST on-page occurrence of
+  a repeated entry (e.g. a field shown on both a detail panel and a related list) is
+  ever the navigation target — a deliberate simplification, not a bug, but worth
+  knowing if the same field appears twice and only one occurrence is reachable by
+  scroll.
+
+**Duplicates — designed, deliberately NOT shipped in v1:** re-read the brief's own
+caution here before building this — "do not assume every repeated translation is a
+problem." The reliable, safe definition arrived at: for a given active NON-base
+language, group all on-page entries by their translated value; a group is only flagged
+when it has 2+ DISTINCT entries (`apiName`+`type`) **whose BASE-LANGUAGE values differ
+from each other**. If the base values are the SAME (e.g. multiple genuinely different
+buttons/fields honestly named "Save" in English), an identical translation is EXPECTED,
+not a bug, and must not be flagged — this is exactly the "legitimately expected" vs.
+"different source labels incorrectly sharing a value" distinction the brief asked for,
+and it's computable from data already fetched (no new API calls). Deferred to its own
+follow-up specifically because it needs a first real-org look at what actual duplicate
+clusters look like before trusting the panel to surface them — the same "don't guess at
+a heuristic without real bad-data examples" discipline PHASE 10's QA Report v2 items
+already follow. Implementing it is now a small, well-specified addition (one more pass
+over `scan()`'s already-collected entries, one more filter tab) whenever that real-org
+look happens.
+
+**Future extensions (not this session):** the Duplicated filter above; extending
+guided navigation to Translation Health's ORG-WIDE list (today's audit panel only
+covers what's actually on the CURRENT page, by design — reaching an off-page entry
+would require navigating Salesforce itself first, a materially different mechanism);
+keyboard shortcuts for Next/Prev (ties into PHASE 17's existing hotkey infrastructure,
+natural fit, not built yet); remembering filter/position across a page navigation
+within the same record page (today's state is page-load-scoped, matching how
+Translation Mode's own scan already resets).
+
+### PHASE 18 additions — first real-org bug round shipped (`DECISIONS.md #61`, 2026-07-21)
+Found via actual guided-navigation use on a real Lightning page, same day v1 shipped —
+exactly the "needs a real click-through" caveat above paying off. Four fixes, each
+root-caused rather than patched:
+
+- **Sticky/pinned-header navigation fixed.** `scrollIntoView` alone couldn't be
+  trusted against Salesforce's pinned headers and nested scroll containers — it could
+  decide a `position: sticky` target was "already visible" by its own rect math, or
+  scroll the wrong container, while the highlight overlay (computed independently via
+  live `getBoundingClientRect()`) kept tracking correctly regardless, which is exactly
+  why the target looked right but the viewport didn't move. Fixed with a
+  verify-and-correct pass (`ensureVisibleAboveObstruction` in `content/index.tsx`) that
+  measures where the target actually ended up and applies a direct corrective scroll on
+  its REAL scrolling ancestor if it's covered by pinned chrome — generic (samples the
+  live DOM for `position: fixed`/`sticky`, no hardcoded Salesforce selectors) and
+  symmetric (doesn't care which direction the navigation came from). `dom-utils.ts`'s
+  `parentAcrossShadow` was exported rather than reimplemented for the shadow-piercing
+  ancestor walks this needed.
+- **Editor-closes-on-click root cause found and fixed — a real Dynamic Hover parity
+  gap, not a click-outside/shadow-DOM bug.** `reconcileAfterEdit()` used to check only
+  `isEngineLive()`, which is ALWAYS false while Translation Mode is on — so finishing
+  ANY edit inside the TM/audit editor (even a harmless textarea blur from clicking a
+  different row's own button) unconditionally tore the whole tooltip down. Dynamic
+  Hover never hit this because `isEngineLive()` stays true there. Fixed by also
+  checking `!tmEditorOpen` — genuine parity, not a second interaction model. Navigating
+  to a new entry (Next/Previous/a different filter) now explicitly cancels an
+  in-progress edit first, matching Escape/outside-click's existing precedent (`#55`).
+- **Complete tab overflow fixed structurally, not with a pixel patch.** The filter
+  tabs row was `display: flex` with no wrap/shrink, so four pills with count badges
+  could overflow past the panel's right edge once counts hit double digits. Switched
+  to a 4-column CSS grid (always exactly matches the container's content width) and
+  restructured each tab to stack its label above its count instead of fighting for
+  width on one line.
+- **Translation scope (all fields vs. current field), evaluated and shipped as a
+  session-local toggle, not a persisted setting.** Both modes are real, requested, and
+  cheap to support: "All fields" (default) is the existing behavior; "Current only"
+  hides every on-page badge except the audit panel's current target, via a new
+  presentational-only `setBadgeScope()` in `translation-mode.tsx` (no re-scan, no
+  re-fetch — just toggling `display:none` on already-built badges). Lives as a
+  single click-to-flip button in the panel's own header, not a `Settings` field — this
+  is a live workflow control flipped mid-session, the same category as the panel's own
+  filter/expanded state, not a stable cross-session preference.
+
+Full write-up, including the exact root-cause reasoning for each: `DECISIONS.md #61`.
 
 ### PHASE 19 — Hover History & Favorites
 **Alta priority.** Backlog ideas #7 and #8, grouped as a pair of small local-list

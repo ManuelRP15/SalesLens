@@ -1,0 +1,320 @@
+:host { all: initial; }
+
+/* Collapsed state: a small, unobtrusive pill — the default footprint while
+   Translate All is on, per PRODUCT.md's "lightweight, never dump information"
+   restraint (ROADMAP.md PHASE 18). */
+.sti-audit-pill {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483645;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: #16325c;
+  background: #ffffff;
+  border: 1px solid #d8dde6;
+  border-radius: 999px;
+  padding: 7px 14px;
+  box-shadow: 0 4px 14px rgba(22, 50, 92, 0.18);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.sti-audit-pill:hover {
+  background: #f7f9fc;
+}
+
+.sti-audit-pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+
+.sti-audit-pill__count {
+  color: #706e6b;
+  font-weight: 400;
+}
+
+.sti-audit-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483645;
+  width: 300px;
+  max-height: min(520px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 12.5px;
+  color: #16325c;
+  background: #ffffff;
+  border: 1px solid #d8dde6;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(22, 50, 92, 0.22);
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.sti-audit-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  flex: none;
+}
+
+.sti-audit-panel__title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.sti-audit-panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Translation scope toggle (ROADMAP.md PHASE 18 §4) — one small button that flips
+   between its two states on click, deliberately not a radio group/settings panel:
+   "switching modes is easy" means one click, not opening a menu. */
+.sti-audit-scope-btn {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1a56db;
+  background: #eef3fd;
+  border: none;
+  border-radius: 999px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sti-audit-scope-btn:hover {
+  background: #dbe7fb;
+}
+
+.sti-audit-panel__collapse {
+  font-family: inherit;
+  font-size: 13px;
+  color: #706e6b;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.sti-audit-panel__collapse:hover {
+  background: #eef1f6;
+}
+
+/* Grid, not flex — a fixed number of EQUAL-width columns is what guarantees this
+   row's total width always exactly matches the stepper row's below it (same
+   container padding, same content edge), regardless of how long a language count
+   badge makes any one label. Flex's default (no wrap, no shrink) let the row
+   overflow past the panel's right edge whenever the 4 labels' natural widths summed
+   past the available space — the exact "Complete" misalignment this replaces. */
+.sti-audit-panel__tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 0 12px 8px;
+  flex: none;
+}
+
+/* Label and count stack vertically rather than sitting side by side — a real page
+   can easily have double-digit counts in every category, and "Identical 11" fighting
+   for width inside a quarter-panel column truncates awkwardly even with ellipsis.
+   Stacked, each column only ever needs to fit the WIDER of the two lines alone. */
+.sti-audit-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  font-family: inherit;
+  color: #514f4d;
+  background: #f3f2f2;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 4px 2px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.sti-audit-tab:hover {
+  background: #e9e8e8;
+}
+
+.sti-audit-tab__label {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.sti-audit-tab--active {
+  background: #eef3fd;
+  border-color: #d8e4fb;
+  color: #1a56db;
+}
+
+.sti-audit-tab__count {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sti-audit-panel__empty {
+  padding: 16px 12px 18px;
+  color: #706e6b;
+  font-style: italic;
+  font-size: 12px;
+}
+
+.sti-audit-panel__stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 12px 8px;
+  flex: none;
+}
+
+.sti-audit-panel__step-btn {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a56db;
+  background: #eef3fd;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  flex: none;
+}
+
+.sti-audit-panel__step-btn:hover:not(:disabled) {
+  background: #dbe7fb;
+}
+
+.sti-audit-panel__step-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sti-audit-panel__step-label {
+  font-size: 11px;
+  color: #706e6b;
+  text-align: center;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sti-audit-panel__current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 0 12px 8px;
+  padding: 8px;
+  background: #f9fafb;
+  border: 1px solid #eef1f6;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+}
+
+.sti-audit-panel__current:hover {
+  background: #f3f5f8;
+}
+
+.sti-audit-panel__current-name {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.sti-audit-panel__current-detail {
+  flex-basis: 100%;
+  font-size: 10.5px;
+  color: #706e6b;
+}
+
+.sti-audit-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sti-audit-badge--sm {
+  padding: 1px 5px;
+  font-size: 9px;
+  flex: none;
+}
+
+.sti-audit-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 8px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  border-top: 1px solid #eef1f6;
+}
+
+.sti-audit-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px;
+  margin-top: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.sti-audit-panel__row:hover {
+  background: #f3f5f8;
+}
+
+.sti-audit-panel__row--active {
+  background: #eef3fd;
+}
+
+.sti-audit-panel__row-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.sti-audit-panel__row-name {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}

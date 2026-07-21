@@ -7,30 +7,35 @@
 
 ## Active work
 
-`feature/quick-compare` (off `main`, which now has PHASE 6b + rounds 1-4/`#53`-`#58`
-all merged) — Quick Compare shipped (`DECISIONS.md #59`), verified
-(typecheck/tests/build + a static visual mockup check), pending push/PR. No other
+`feature/translation-audit` (off `main`, which now has PHASE 6b + rounds 1-4/`#53`-`#58`
++ Quick Compare/`#59` all merged) — Translation Audit v1 (`#60`) shipped, then
+**real-org tested by the user and its first bug round fixed same day** (`#61`):
+sticky-header scroll correction, editor-closes-on-click root cause (Dynamic Hover
+parity), Complete-tab overflow, and a session-local translation scope toggle. Verified
+(typecheck/tests/build + static visual mockups); pending push/PR update. No other
 Epic open.
 
 **Settled this session, no longer open questions:**
-- **Quick Compare closes `PRODUCT.md`'s MVP capability #2** (Translation Inspector) —
-  the hover tooltip now shows every active language per candidate (present or
-  missing, not just for editable types) and marks a value identical to the source
-  language, reusing `#58`'s `Settings.flagIdenticalTranslations` rather than adding a
-  new setting. Built as an enhancement to the existing tooltip rows, not a new
-  display mode or panel.
-- **`BASE_LANGUAGE` centralized** in `shared/types.ts` — `metadata-translations.ts`,
-  `background/index.ts`, `content/translation-mode.tsx`, and the new usage in
-  `Tooltip.tsx` all import the one constant instead of each declaring their own
-  `"en_US"` copy. `salesforce-api.ts`'s write-path `CUSTOM_LABEL_BASE_LANGUAGE`
-  deliberately left alone (same value, different concern, write-path code doesn't get
-  touched for an unrelated read-side cleanup).
-- **PHASE 11's OTHER half (language order/colors/icons, visibility profiles) stays
-  explicitly deferred** — lower value, adds settings surface the product philosophy
-  discourages unless there's a clear need; not built this session.
-- Two stale doc lines fixed while in the area: `PRODUCT.md`'s MVP capability #3
-  (Translation Mode) said "not started," years out of date (it shipped through v4
-  long ago) — corrected.
+- **Translation Audit's core interaction model is now real-org CONFIRMED WORKING**
+  ("working very well overall," direct feedback) — the four issues below were found
+  by actually using it on a real Lightning page, not new gaps in the concept itself.
+- **The sticky-header scroll bug's actual root cause**: `scrollIntoView` alone isn't
+  reliable against `position: sticky`/pinned Salesforce chrome and nested scroll
+  containers — it can decide a sticky target is "already visible" by its own rect
+  math, or scroll the wrong container, while the highlight overlay (independent,
+  rect-based) keeps tracking correctly regardless. Fixed with a verify-and-correct
+  pass, not a bigger reliance on `scrollIntoView`.
+- **The "modal closes on click" bug's actual root cause**: NOT a click-outside/shadow-
+  DOM issue (that mechanism, `#54`, was never broken) — `reconcileAfterEdit()` was
+  checking only `isEngineLive()`, which is always false while Translation Mode is on,
+  so finishing ANY edit inside the TM/audit editor (even a harmless blur from clicking
+  a different row's own button) tore the whole tooltip down. One-line fix
+  (`&& !tmEditorOpen`) brings it to genuine parity with Dynamic Hover, which never had
+  this bug because its own liveness check stays true.
+- **Translation scope (all fields vs. current field) evaluated and shipped as a
+  session-local UI toggle, not a persisted `Settings` field** — a live workflow
+  control (declutter the page's badges down to the current target) belongs with the
+  panel's own already-session-local filter/expanded state, not in the popup.
 
 ## Git workflow (established 2026-07-20)
 
@@ -40,101 +45,102 @@ conventions are documented in `WORKFLOW.md`'s "Git workflow" section; a PR descr
 template lives at `.github/PULL_REQUEST_TEMPLATE.md`. Repo:
 https://github.com/ManuelRP15/SalesLens.
 
-**Note on this branch's PR history:** `bug/editing-and-hover-polish` (rounds 1-4)
-went through TWO separate PRs on the same branch name — PR #4 (rounds 1-2, merged
-mid-session) and PR #5 (rounds 3-4, opened after PR #4 had already merged, since a
-merged PR can't be reopened for later commits on the same branch). If a future session
-reuses a branch name after merging it once, check whether a fresh PR is needed rather
-than assuming the old one still applies.
+**Note on branch/PR history:** `bug/editing-and-hover-polish` went through TWO
+separate PRs on one branch name (PR #4 then PR #5). `feature/quick-compare` was PR #6,
+cleanly merged. `feature/translation-audit` is PR #7, still OPEN — this session's bug
+fixes land as additional commits on the SAME branch/PR rather than a new one, since the
+PR hadn't merged yet when the user's real-org testing found these issues.
 
-## What just happened (most recent session — Quick Compare, `DECISIONS.md #59`)
+## What just happened (most recent session — Translation Audit bug round, `DECISIONS.md #61`)
 
-Picked as the single highest-value remaining CORE capability after reassessing the
-project fresh (previous session's work — `#53`-`#58` — was confirmed merged to `main`
-first). Reasoning: it's the last open item in an MVP-tier (not premium) capability,
-it deepens the tooltip itself (the product's primary, already-core surface) rather
-than adding a new panel, and it needed zero new settings — see `#59` for the full
-write-up. Concretely:
-- `Tooltip.tsx`'s `CandidateBlock` now renders a row for EVERY active language on
-  every candidate, not just editable ones — a missing language on a non-editable
-  (mostly standard/read-only) entry now shows a plain "Not translated" placeholder
-  instead of being silently omitted, matching what Translation Mode/Health already do
-  since `#58`.
-- A value identical to the base-language (`en_US`) value gets a small "≈" mark,
-  gated by the existing `Settings.flagIdenticalTranslations` toggle, threaded through
-  as a new `flagIdentical` prop on `Tooltip`/`CandidateBlock` (sourced from
-  `content/index.tsx`'s already-computed `tmStyle.flagIdentical` — no new settings
-  read, no new module-level state).
-- `shared/types.ts` gained `BASE_LANGUAGE = "en_US"`, replacing three independent
-  local copies of the same literal (`metadata-translations.ts`, `background/index.ts`,
-  `content/translation-mode.tsx`) — a small refactor done because this session would
-  otherwise have added a FOURTH copy in `Tooltip.tsx`.
-- Explicitly did NOT build a separate compact/expanded tooltip mode or PHASE 11's
-  language-config settings (order/colors/icons/profiles) — see #59/ROADMAP.md for why.
+Direct real-org feedback on `#60`, investigated for root cause per explicit
+instruction rather than patched superficially — all four fixes below trace to a
+specific, understood cause, not a guess:
 
-## Earlier — rounds 1-4 (`#53`-`#58`, now on `main`)
+1. **Sticky/pinned-header navigation.** `content/index.tsx` gained
+   `ensureVisibleAboveObstruction()` (+ `findScrollableAncestor()`,
+   `measureTopObstruction()`) — a verify-and-correct pass run after `scrollIntoView`
+   should have settled. Measures where the target actually ended up, detects pinned
+   chrome generically (samples the live DOM for `position: fixed`/`sticky`, no
+   hardcoded Salesforce selectors), and applies one corrective `scrollBy` on the
+   target's REAL scrolling ancestor if needed. Symmetric — doesn't care which
+   direction the navigation came from. `dom-utils.ts`'s `parentAcrossShadow` was
+   exported (not reimplemented) for the shadow-piercing ancestor walks this needed.
+2. **Editor-closes-on-click.** `reconcileAfterEdit()` now checks `!isEngineLive() &&
+   !tmEditorOpen` instead of just `!isEngineLive()` — see root cause above. Also:
+   Next/Previous/filter-change now explicitly cancel an in-progress edit first
+   (matching Escape/outside-click's existing `#55` precedent), since `openTmEditor`'s
+   own `isEditingActive` guard previously meant navigating away mid-edit silently
+   refused to open the new target's editor at all.
+3. **Complete-tab overflow.** `audit-panel.css`'s tabs row is now a 4-column CSS grid
+   (always exactly matches the container width, unlike flex's overflow-prone default)
+   with each tab's label stacked above its count instead of competing for width
+   inline — fixes both the overflow AND awkward truncation with realistic double-digit
+   counts.
+4. **Translation scope toggle** (`AuditPanel`'s header, `translation-mode.tsx`'s new
+   `setBadgeScope()`) — "All fields" (default) vs. "Current only," a pure
+   `display:none` visibility toggle over already-built badges, zero re-scanning.
+   Session-local, resets to "all" each Translation Mode activation.
 
-**Round 4** (`#57`/`#58`): the popup's shortcut settings (Toggle Inspection Mode /
-Hold to move tooltip) redesigned from confusing "Always"/"Off" buttons to a shared
-Enabled/Disabled switch + key recorder, with mutual conflict prevention
-(`shared/hotkeys.ts`). Translation Mode/Translation Health gained the missing +
-identical-to-source signals that `#59` above then brought to the tooltip too.
+## Earlier — Translation Audit v1 (`#60`), Quick Compare (`#59`), rounds 1-4 (`#53`-`#58`)
 
-**Round 3** (`#56`): Simple Mode (`Settings.simpleMode`, default on) scopes hover/
-Translation Mode/Translation Health to objects/fields/picklists/Custom Labels by
-default; `FieldLabel`/`PicklistValue` editing narrowed to custom (`__c`) only;
-hover engine redesigned into two independent keys (toggle = sticky pin, hold =
-temporary live retarget); tooltip simplified (customized mark + Copy SOQL/XML
-removed).
+**Translation Audit v1** (`#60`): "Translate All" evolved from display+edit into a
+guided audit workflow — filter to Missing/Identical/Complete, step through issues, the
+page scrolls to and highlights each one, the existing editor opens pre-seeded on the
+exact problem language, save, the count updates live.
 
-**Round 2** (`#55`): standard-field XSD insert-order bug fixed; Escape/outside-click
-now cancel an in-progress edit.
+**Quick Compare** (`#59`): the hover tooltip shows every active language per candidate
+and marks a value identical to the source language — closed `PRODUCT.md` MVP
+capability #2. Centralized `BASE_LANGUAGE` in `shared/types.ts`.
 
-**Round 1** (`#54`): metadata-edit blanking bug fixed (concurrency check compared
-against the wrong baseline); tooltip made a solid surface so clicks inside it don't
-close it; QuickAction limitation (global/standard actions unsupported) surfaced with
-a clean message.
-
-**PHASE 6b** (`#53`, earlier still): editing extended from Custom-Labels-only to 8
-more `LabelType`s via a Metadata API `deploy()` pipeline.
+**Round 4** (`#57`/`#58`) / **Round 3** (`#56`) / **Round 2** (`#55`) / **Round 1**
+(`#54`) / **PHASE 6b** (`#53`): shortcut settings UX, Simple Mode, hover engine
+redesign, metadata-edit bug fixes, PHASE 6b's `deploy()` editing pipeline. Full detail
+in `DECISIONS.md`.
 
 ## Known gaps / untested — check before assuming something works
 
 - **Nothing in this codebase has been verified against a real Salesforce org by the
-  agent, ever.** Every "done" feature is confirmed only by build/typecheck/unit tests
-  (plus, for this session's UI change, a static HTML mockup reproducing the exact
-  markup/CSS — not the same as a real hover in a real org) unless stated otherwise.
-  Don't report something as working end-to-end without saying this caveat.
-- **Quick Compare (`#59`) needs a real-org visual check first** — confirm the extra
-  rows (now showing on standard fields/objects/picklists too) don't feel cluttered in
-  practice, the "≈" mark reads as a hint rather than an error, and "Not translated"
-  vs "—" is the right distinction between read-only and editable missing rows.
-- **The `en_US`-base assumption now backs THREE things** (Custom Label base-language
-  editing `#41`, Translation Health/Mode's identical-flag `#58`, and Quick Compare's
-  identical-flag `#59`) — all from the same centralized `BASE_LANGUAGE` constant now,
-  so a non-English-base org fix is one change, but still unverified against one.
-- **The hover engine redesign (`#56`)** — sticky toggle pin, independent hold-to-move,
-  magnifier show/hide, both close paths — still needs its first real-org click-through.
+  agent, ever** — every fix in this session was root-caused via code reading/tracing
+  and confirmed only by build/typecheck/unit tests + static mockups, NOT by watching
+  it work live, even though the BUG reports themselves came from real-org use.
+- **This session's four fixes need a real-org re-confirmation** (the user found the
+  original bugs live; the FIXES themselves haven't been clicked through yet):
+  - Sticky-header scroll: test Header→Body, Body→Header, Header→Header, Body→Body,
+    and specifically a compact/sticky highlights panel and any nested-scroll related
+    list.
+  - Editor persistence: click a different row's Copy/Edit button while a textarea is
+    focused, edit and save, click inputs/textarea/buttons throughout — confirm it
+    never disappears except via outside-click/Escape/Next/Previous/navigating away.
+  - Complete-tab alignment: confirm visually at realistic (including double-digit)
+    counts.
+  - Scope toggle: confirm "Current only" hides other badges but not the current
+    target's own, and that toggling it mid-edit doesn't disturb the open editor.
+- **Duplicated-translation detection is designed but NOT implemented** — see
+  `ROADMAP.md` PHASE 18 for the exact algorithm when picked up next.
+- **The `en_US`-base assumption now backs FOUR things** (`#41`, `#58`, `#59`, `#60`) —
+  one centralized `BASE_LANGUAGE` constant, so a non-English-base org fix is one
+  change, but still unverified against one.
+- **The hover engine redesign (`#56`)** and **the shortcut settings UX (`#57`)** both
+  still need their first real-org click-through.
 - **PHASE 6b's deploy() pipeline is a real write to org metadata** — still high-stakes,
   re-test patching an EXISTING custom field/picklist translation and filling in a
-  MISSING one; standard fields/picklists should show no edit button at all.
+  MISSING one.
 - **QuickAction editing works only for object-specific custom actions** — global/
   standard actions show a "not supported yet" message (`#54`). Deferred (PHASE 6c).
-- **Simple Mode's default-on scoping (`#56`)** and **the shortcut settings UX (`#57`)**
-  both still need their first real popup/hover click-through.
 - The Translation Mode editor fix (`#50`), Enter-to-edit (`#49`), the CustomLabel/
   custom-field Setup-navigation URLs (`#47`/`#51`) all still need real-org confirmation
   — carried over, unrelated to this session's work.
 
 ## Immediate next step
 
-Push `feature/quick-compare`, open its PR, and get a real-org pass — Quick Compare
-(`#59`) is the highest-value thing to confirm, ideally alongside the still-unconfirmed
-`#56`/`#57` (hover redesign, shortcut UX) and PHASE 6b editing while a real org session
-is already happening. Once merged, next candidates (see `ROADMAP.md`'s status table):
-**PHASE 16** (Workspace, **Muy Alta**, large — own dedicated session(s)), **PHASE 18**
-(Translation Navigator & Page Coverage, Alta — a read-only whole-page view reusing
-Translation Mode's own scan, no new metadata work), PHASE 6c (ObjectLabel/RelatedList,
-global QuickAction, standard field/picklist editing — deliberately lower priority),
-rest of PHASE 17 (arrow-key navigation, blocked on PHASE 18's match list), PHASE 11's
-remaining half (language order/colors/icons — deliberately low priority, cosmetic).
+Push the new commits to `feature/translation-audit` (PR #7, still open) and get the
+user's re-confirmation on the four fixes above — this is the highest-value thing to
+close out before considering Translation Audit production-ready. Once merged, next
+candidates (see `ROADMAP.md`'s status table): **PHASE 16** (Workspace, **Muy Alta**,
+large — own dedicated session(s)), the Duplicated filter designed in PHASE 18 (small,
+well-specified, needs a real-org look at actual duplicate clusters first), PHASE 6c
+(ObjectLabel/RelatedList, global QuickAction, standard field/picklist editing —
+deliberately lower priority), rest of PHASE 17 (arrow-key navigation, keyboard
+shortcuts for the audit stepper), PHASE 11's remaining half (language order/colors/
+icons — deliberately low priority, cosmetic).
