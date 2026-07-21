@@ -3,6 +3,7 @@ import { deepElementFromPoint, resolveHoverTarget, guessObjectApiNameFromUrl } f
 import { Tooltip } from "./Tooltip";
 import tooltipCss from "./tooltip.css?inline";
 import { startTranslationMode, stopTranslationMode, type TmStyle } from "./translation-mode";
+import { normalizeBareKey } from "../shared/hotkeys";
 import type { LabelEntry, ResolveTextResponse, SaveTranslationRequest, SaveTranslationResponse, Settings } from "../shared/types";
 
 function tmStyleFromSettings(s: Settings | undefined): TmStyle {
@@ -10,6 +11,7 @@ function tmStyleFromSettings(s: Settings | undefined): TmStyle {
     preset: s?.tmPreset ?? "stacked",
     showFlags: s?.tmShowFlags ?? true,
     showLangCodes: s?.tmShowLangCodes ?? true,
+    flagIdentical: s?.flagIdenticalTranslations ?? true,
   };
 }
 
@@ -137,9 +139,9 @@ function updateInspectorCursor() {
 
 /** Matches a single configured key (`inspectorHotkey`/`holdHotkey`, e.g. "Alt", "Shift", "Control", "q") against a keydown/keyup event — shared by both, since both are bare (non-combo) hotkeys. */
 function matchesBareKey(configured: string | null, e: KeyboardEvent): boolean {
-  if (!configured) return false;
-  const key = configured === "Ctrl" ? "Control" : configured;
-  return e.key.toUpperCase() === key.toUpperCase();
+  const normalized = normalizeBareKey(configured);
+  if (!normalized) return false;
+  return e.key.toUpperCase() === normalized;
 }
 
 /** Matches combos like "Alt+T", "Ctrl+Shift+I" — modifiers must match EXACTLY. */
