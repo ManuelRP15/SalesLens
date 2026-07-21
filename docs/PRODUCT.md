@@ -39,15 +39,21 @@ to real user feedback instead of a fixed master plan.
    the user's own language: choose which languages to show, compare several languages
    at once, highlight missing translations, highlight differences between languages,
    always keeping the current screen's context.
-   *Status: language selection (popup) and multi-language display shipped since PHASE 4.
-   "Show all languages" override and missing-translation highlighting added in PHASE 4
-   (see ROADMAP.md PHASE 4 additions). Highlighting differences between languages is still open.*
+   *Status: CLOSED 2026-07-21 (DECISIONS.md #59, "Quick Compare"). Language selection
+   (popup) and multi-language display shipped since PHASE 4; every active language now
+   gets a row in the tooltip (present or missing, not just editable types); a value
+   identical to the source language gets a small "≈" mark (`Settings.flagIdenticalTranslations`,
+   same signal as Translation Mode/Health since `#58`). Built as an enhancement to the
+   existing tooltip, not a new panel — see ROADMAP.md PHASE 11.*
 
 3. **Translation Mode** — an optional mode that transforms the whole UI: instead of
    relying on hover, it shows each label's selected translations right underneath it
    (e.g. "Applicant" followed by "🇪🇸 Solicitante", "🇫🇷 Demandeur"). Ideal for QA,
    functional testing, and translation review. Must be easy to toggle on/off.
-   *Status: not started — a distinct future module (see PHASE 9).*
+   *Status: shipped (v4, see ROADMAP.md PHASE 9) — popup toggle, configurable chip
+   style, Custom Label editing, and (since `#58`) missing/identical-to-source signals
+   matching the tooltip's own (`#59`). This status line was stale until 2026-07-21;
+   don't trust a capability's status here without cross-checking ROADMAP.md's phase.*
 
 4. **Translation Health** — automatically analyze translation quality: untranslated
    languages, empty translations, translations identical to the source language

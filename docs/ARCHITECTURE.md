@@ -28,7 +28,7 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 
 | File | Responsibility |
 |---|---|
-| `types.ts` | Every shared type: `LabelEntry`, `LabelType`, `Settings`, all `chrome.runtime` message request/response shapes, `isEditableLabelType()`/`isEditableEntry()` (field-level editability), `isInSimpleScope()` (Simple Mode, `#56`). |
+| `types.ts` | Every shared type: `LabelEntry`, `LabelType`, `Settings`, all `chrome.runtime` message request/response shapes, `isEditableLabelType()`/`isEditableEntry()` (field-level editability), `isInSimpleScope()` (Simple Mode, `#56`), `BASE_LANGUAGE` (the `"en_US"` base-language assumption, `#41`/`#59` — the one shared copy every read-side module imports instead of declaring its own). |
 | `normalize.ts` | Text normalization (`normalizeText`/`normalizeTextLoose`) used to build and query the reverse index. |
 | `index-builder.ts` | `buildReverseIndex()` + `resolveText()` — the disambiguation funnel. The single most important algorithm in the project; always returns 0 or 1 candidates, never a list (`DECISIONS.md #28`). |
 | `index-builder.test.ts` | Unit tests for the funnel above — no Chrome/Salesforce dependency. |
@@ -50,7 +50,7 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 |---|---|
 | `index.tsx` | The hover engine (mousemove-driven, Inspection Mode / Always Hover, tooltip ownership zone — `DECISIONS.md #43`), mounts the tooltip, wires Translation Mode on/off, `SAVE_TRANSLATION` messaging. |
 | `dom-utils.ts` | `deepElementFromPoint`/`extractOwnText` (hover), `resolveFieldContext`/`resolveSurfaceContext` (DOM-structure disambiguation hints), `collectTranslatableTargets` (Translation Mode's full-tree scan). |
-| `Tooltip.tsx` | The tooltip React component — display, inline Custom Label editor, Copy buttons, reports its own rect via `onRectChange` for the hover-ownership zone. |
+| `Tooltip.tsx` | The tooltip React component — display (Quick Compare: every active language shown, missing/identical-to-source marked, `#59`), inline Custom Label editor, Copy buttons, reports its own rect via `onRectChange` for the hover-ownership zone. |
 | `tooltip.css` | Styles injected into the closed Shadow DOM. |
 | `tooltip-constants.ts` | `TYPE_LABELS`/`TYPE_COLORS`/`langAccent`/`displayApiName` — shared visual language between `Tooltip.tsx` and `translation-mode.tsx`. Also `setupPath` — per-type Setup-navigation URL generator (PHASE 5), returning `null` rather than guessing when a type has no confident mapping. (Copy SOQL/XML Member were removed entirely in `#56`.) |
 | `translation-mode.tsx` | Translation Mode: bulk DOM scan, `RESOLVE_TEXTS_BULK`, inline translation chips appended directly to matched elements (real DOM injection, fully reversible on toggle-off) — including distinct dashed "missing" chips and "≈ identical to source" marks (`DECISIONS.md #58`). |

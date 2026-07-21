@@ -31,7 +31,7 @@ marked "done" before 2026-07-21 is off by default without checking.
 | 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done (advanced types opt-in), Lens pending | — |
 | 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing; advanced-type badges opt-in); missing/identical-to-source chip signals shipped 2026-07-21 (DECISIONS.md #58) | rest of QA Mode refinement (longer-term Screen Flows) pending |
 | 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); rest of QA Report v2 (Duplicated/Broken/Terminology) pending | — |
-| 11 | Language config UI + Quick Compare | ⬜ pending | — |
+| 11 | Language config UI + Quick Compare | 🟡 Quick Compare shipped 2026-07-21 (DECISIONS.md #59, closes PRODUCT.md MVP capability #2); language order/colors/icons/profiles still pending | — |
 | 12 | Advanced Metadata Inspector | ⬜ pending | — |
 | 13 | Smart Search | ⬜ pending | — |
 | 14 | Productivity Actions | 🟡 Copy API Name done; Copy SOQL/XML **removed** 2026-07-21 (DECISIONS.md #56 — kept the extension simple per direct product feedback); export pending | — |
@@ -338,18 +338,31 @@ opened via `chrome.tabs.create` rather than referenced directly in the manifest.
 
 ### PHASE 11 — Language configuration UI + Quick Compare
 Beyond the popup's language checkboxes: user-configurable language order, colors, and
-icons (currently hardcoded in `Tooltip.tsx`'s `LANG_FLAGS`/`TYPE_COLORS`), plus a
-compact vs. expanded tooltip display mode. All persisted in `Settings` the same way
-`activeLanguages`/`enabled` already are.
+icons (currently hardcoded in `tooltip-constants.ts`'s `langAccent`/`TYPE_COLORS`).
+Would persist in `Settings` the same way `activeLanguages`/`enabled` already do — still
+pending, and lower priority than most of what's left (see Positioning in `PRODUCT.md`:
+per-user cosmetic customization isn't where this product's value lives).
 
-**Quick Compare** (2026-07-19 product review, ⭐⭐⭐⭐⭐ potential, called out as
-"visually spectacular"): a compact side-by-side view of one label's value across every
-active language in one glance (`EN Applicant / ES Solicitante / FR Applicant ⚠️ / NL
-Aanvrager`), with a warning mark on values identical to the source language — this is
-the concrete implementation of the still-open "highlight differences between
-languages" item under Translation Inspector in `PRODUCT.md`'s MVP capabilities. Likely
-lives as an expanded/alternate tooltip display mode gated by this phase's compact vs.
-expanded setting, rather than a separate UI surface.
+**Quick Compare — shipped 2026-07-21 (`DECISIONS.md #59`), closes `PRODUCT.md` MVP
+capability #2.** 2026-07-19 product review, ⭐⭐⭐⭐⭐ potential, called out as "visually
+spectacular": a compact side-by-side view of one label's value across every active
+language in one glance, with a warning mark on values identical to the source
+language. Reassessed at implementation time: the tooltip's existing per-language rows
+(a `10px 50px 1fr auto` CSS grid, `Tooltip.tsx`) were already the right "side by side,
+one glance" bones — what shipped is the SAME view, not a new alternate mode:
+- Every active language now gets a row, present or not (previously non-editable types
+  — most of Simple Mode's own core scope — silently hid a language with no value at
+  all; a missing one now shows a plain "Not translated" placeholder, matching the
+  editable case's existing "—" + edit-affordance treatment).
+- A value identical to the base-language value gets a small "≈" mark, the exact same
+  signal and visual language as Translation Mode/Health's own (`#58`), gated by the
+  same `Settings.flagIdenticalTranslations` — no new setting needed.
+
+Deliberately did NOT add a separate compact/expanded display mode — the existing
+vertical layout already reads as a scannable compare view once missing/identical are
+visible (confirmed via a static mockup, see `#59`); a second layout would be exactly
+the kind of "control without clear added value" the product philosophy warns against
+unless real-org feedback says otherwise.
 
 **Visibility configuration & user profiles (2026-07-20 roadmap review, backlog ideas #15/#16):** a settings panel to show/hide metadata types (Custom Labels, Field Labels, Picklists, Buttons, Validation Rules, etc.) — same `Settings`-persisted pattern as `activeLanguages`, default to showing only what's genuinely useful to most developers/QA rather than every type. On top of it, **preset profiles** (Developer / QA / Admin / Consultant) that flip a bundle of these visibility toggles at once rather than making the user configure each one individually — profiles are just named presets over the same underlying visibility settings, not a separate mechanism.
 

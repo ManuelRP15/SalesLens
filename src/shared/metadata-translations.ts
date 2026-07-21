@@ -1,4 +1,4 @@
-import type { LabelEntry } from "./types";
+import { BASE_LANGUAGE as BASE_LANG, type LabelEntry } from "./types";
 import {
   decodeZipEntry,
   findZipEntriesBySuffix,
@@ -27,9 +27,6 @@ import {
   type LocalizedObjectInfo,
 } from "./describe-api";
 import { PLATFORM_LABEL_ENTRIES } from "./platform-labels";
-
-/** Language key used for the base/master value (same convention as fetchAllTranslations). */
-const BASE_LANG = "en_US";
 
 function splitFieldKey(fieldKey: string): { objectApiName: string; fieldApiName: string } {
   const dotIdx = fieldKey.lastIndexOf(".");

@@ -124,6 +124,15 @@
   font-style: italic;
 }
 
+/* Quick Compare's soft "might not be translated" hint (DECISIONS.md #59) — a mark,
+   not a warning color, matching Translation Mode's own "≈" chip treatment so the
+   same signal reads consistently wherever translations are shown. */
+.sti-identical-mark {
+  color: #b8860b;
+  font-size: 10px;
+  margin-left: 3px;
+}
+
 .sti-lang-actions {
   display: flex;
   align-items: center;

@@ -502,6 +502,7 @@ function renderTmTooltip(entry: LabelEntry, x: number, y: number, autoEditLangua
       y={y}
       candidates={[entry]}
       activeLanguages={activeLanguages}
+      flagIdentical={tmStyle.flagIdentical}
       autoEditLanguage={autoEditLanguage}
       onSaveTranslation={saveTranslation}
       onEditingActiveChange={(active) => {
@@ -533,6 +534,7 @@ function showTooltip(text: string, x: number, y: number, response: ResolveTextRe
       y={y}
       candidates={response.candidates}
       activeLanguages={activeLanguages}
+      flagIdentical={tmStyle.flagIdentical}
       onSaveTranslation={saveTranslation}
       onEditingActiveChange={(active) => {
         isEditingActive = active;
