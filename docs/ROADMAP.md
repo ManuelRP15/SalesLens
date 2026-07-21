@@ -30,7 +30,7 @@ marked "done" before 2026-07-21 is off by default without checking.
 | 7 | Standard labels without Translation Workbench | ✅ done | — |
 | 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done (advanced types opt-in), Lens pending | — |
 | 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing; advanced-type badges opt-in); missing/identical-to-source chip signals shipped 2026-07-21 (DECISIONS.md #58) | rest of QA Mode refinement (longer-term Screen Flows) pending |
-| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); rest of QA Report v2 (Duplicated/Broken/Terminology) pending | — |
+| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); **QA Report v2 RETIRED 2026-07-21** (DECISIONS.md #64, archived at tag `archive/translation-health-v2`) | — |
 | 11 | Language config UI + Quick Compare | 🟡 Quick Compare shipped 2026-07-21 (DECISIONS.md #59, closes PRODUCT.md MVP capability #2); language order/colors/icons/profiles still pending | — |
 | 12 | Advanced Metadata Inspector | ⬜ pending | — |
 | 13 | Smart Search | ⬜ pending | — |
@@ -318,18 +318,15 @@ opened via `chrome.tabs.create` rather than referenced directly in the manifest.
   per-language detail as Missing. Other consistency checks beyond missing/identical
   (Duplicated, Broken, Terminology) are still open — see QA Report v2 below.
 
-**Future refinement — QA / Localization Report v2 (2026-07-19 product review,
-⭐⭐⭐⭐⭐ potential):** extend the current per-language missing-count table with:
-- **Duplicated** detection: the same translated value used for two different
-  `apiName`s in the same language, a common copy-paste mistake worth flagging.
-- **Broken** detection: values containing leftover merge-field syntax, unresolved
-  placeholders, or obviously truncated text — needs a concrete definition of "broken"
-  before implementation; don't guess at a heuristic without real bad-data examples
-  from an org.
-- **Broken references** (2026-07-20 roadmap review, backlog idea #24): flag translations pointing at metadata that no longer exists in the org — stale entries surviving a rename/delete, detectable by cross-referencing the health computation against the latest `listMetadata` results already fetched on each refresh, no new API calls.
-- **Terminology consistency checker** (2026-07-20 roadmap review, backlog idea #14 "AI Consistency Checker" — despite the name, this doesn't require an actual model): flag when the same source term (e.g. "Account", "Save") is translated inconsistently across different entries in the same language (e.g. "Cuenta" in one place, "Cliente" in another) — a clustering/grouping pass over the existing reverse index, not a new data source. Needs a concrete similarity/grouping definition confirmed against real inconsistency examples before implementation, same "don't guess at a heuristic" discipline as the Broken-detection bullet above.
-- **Export** (CSV/JSON) of the report — same underlying need as PHASE 14's export item,
-  should share one implementation.
+**QA / Localization Report v2 — RETIRED 2026-07-21 (`DECISIONS.md #64`).** The planned
+extensions (Duplicated / Broken / Broken-references / Terminology-consistency detection,
+report export) are no longer active roadmap: Translation Audit (PHASE 18) became the
+product's working QA surface and serves the same user need in-context, and the epic had
+become a source of orchestration complexity out of proportion to its value. A completed
+Duplicated-detection implementation (pure module + 209-line test suite + a preview
+harness) is preserved at git tag `archive/translation-health-v2` — if any of this is
+revived, the likely shape is an **Audit filter** (see PHASE 18's deferred "Duplicated
+filter"), reusing that module, not a Health-page column.
 - ✅ **Architecture guidance followed**: "identical to source language" above and
   PHASE 9's chip flagging are driven by the exact same `computeTranslationHealth()`
   computation in `background/index.ts` (`identicalToSourceLanguages`), not two
