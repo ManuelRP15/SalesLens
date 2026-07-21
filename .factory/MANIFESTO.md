@@ -67,6 +67,9 @@ question that stops the line is a success, not a failure.
    checklist — the factory stops at that boundary and says so. This is the project's #1
    historical failure mode (see `DECISIONS.md` — most bugs were "real-org reported");
    the factory is built around it, not in denial of it. See `METHODOLOGY.md` gate **G4**.
+   And never report a user-facing epic DONE without a **demonstrated, observable outcome the
+   user can reach** — code existing and green machine gates are not delivery. This is the
+   run-1 lesson: an epic passed every gate while the product was unchanged. See gate **G-PO**.
 2. **Run the minimum effective process for the risk.** Don't over-process a typo; don't
    under-process a write-path change. Routing is in `METHODOLOGY.md`, not improvised.
 3. **The project's own rules win.** The adapter's non-negotiables (for STI, the 10 rules

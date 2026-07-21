@@ -91,6 +91,12 @@ The universal gates (`../METHODOLOGY.md §2`) with these project bindings:
 - **G2:** `npx tsc --noEmit` clean · `npx vitest run` green · `npm run build` succeeds.
 - **G4 machine:** logic → a `vitest` test; interaction → exercised in `npm run harness`.
 - **G4 real-world:** a Manual Testing checklist per `.github/PULL_REQUEST_TEMPLATE.md`.
+- **G-PO (Product Outcome):** the user-facing surface must be **rendered and observed**, not
+  just built — the content-script UI via the dev-harness; a standalone page (e.g. Translation
+  Health) via a preview harness that stubs `chrome.storage` and mounts the real component
+  (`health-harness/`, `DECISIONS.md #64`); read it back (`read_page`/`get_page_text`) or
+  screenshot. And state **which runnable artifact** the user loads to see it (branch + `dist/`).
+  A green build on an unmerged branch is not a delivered outcome.
 - **G5:** `DECISIONS.md` + `CURRENT_STATE.md` (always) per `WORKFLOW.md` ownership.
 - **G6:** branch `feature/|bug/|refactor/<name>`; PR body per the template.
 - **G7:** the owner confirms real-org behavior before merge — never merge on factory initiative.
