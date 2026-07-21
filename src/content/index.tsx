@@ -14,10 +14,11 @@ function tmStyleFromSettings(s: Settings | undefined): TmStyle {
 }
 
 // ── Hover engine tuning ──────────────────────────────────────────────────────
-// Debounce for Always Hover only — Inspection Mode resolves with ZERO delay
-// (entering the mode IS the explicit request to inspect, same philosophy as the old
-// hold-to-inspect had). CLEAR_GRACE_MS only applies in Always Hover too — Inspection
-// Mode never auto-clears on "nothing under the cursor", see inspectAt().
+// Debounce/fade-out (HOVER_DEBOUNCE_MS/CLEAR_GRACE_MS) apply ONLY to true Always Hover
+// (no toggle key configured at all) — toggle mode's sticky pin and an active hold-peek
+// both resolve with ZERO delay (each is an explicit "inspect now" signal) and never
+// auto-clear on "nothing under the cursor" — see inspectAt()/handlePointerMove() and
+// DECISIONS.md #56.
 const HOVER_DEBOUNCE_MS = 120;
 const CLEAR_GRACE_MS = 300;
 const SCROLL_REINSPECT_MS = 80;
@@ -37,9 +38,12 @@ let activeLanguages: string[] = [];
 let translationModeEnabled = false;
 let tmStyle: TmStyle = tmStyleFromSettings(undefined);
 let inspectorHotkey: string | null = "Alt";
+let holdHotkey: string | null = "Shift";
 let tmHotkey: string | null = "Alt+T";
-/** True while Inspection Mode is toggled on (click/press the key once, no holding — see enterInspectionMode). */
+/** True while Inspection Mode is toggled on (press the key once — see enterInspectionMode). Sticky, not continuous: DECISIONS.md #56 — once something is pinned, mouse movement alone no longer retargets it. */
 let inspectionModeActive = false;
+/** True while `holdHotkey` is physically held down — the "Minecraft shift" companion to the sticky toggle above: grants LIVE, zero-debounce retargeting while held, independent of `inspectionModeActive`, and freezes/pins on whatever's under the cursor the instant it's released. See DECISIONS.md #56. */
+let holdKeyActive = false;
 /** Last known cursor position — lets the engine resolve immediately on keydown/scroll, without waiting for the next mousemove. */
 let lastMouseX = 0;
 let lastMouseY = 0;
@@ -103,7 +107,7 @@ document.addEventListener(
 
 const INSPECTOR_CURSOR_STYLE_ID = "sti-inspector-cursor";
 
-/** Magnifier cursor over the WHOLE page while Inspection Mode is on — a per-element style is beaten by Salesforce's own cursor rules, a !important stylesheet is not. */
+/** Magnifier cursor over the WHOLE page — a per-element style is beaten by Salesforce's own cursor rules, a !important stylesheet is not. */
 function setInspectorCursor(on: boolean) {
   const existing = document.getElementById(INSPECTOR_CURSOR_STYLE_ID);
   if (on && !existing) {
@@ -116,9 +120,25 @@ function setInspectorCursor(on: boolean) {
   }
 }
 
-function matchesInspectorKey(e: KeyboardEvent): boolean {
-  if (!inspectorHotkey) return false;
-  const key = inspectorHotkey === "Ctrl" ? "Control" : inspectorHotkey;
+/**
+ * The magnifier only means anything while actively SEARCHING for something to pin —
+ * once something IS pinned (DECISIONS.md #56's sticky toggle mode), it just clutters
+ * the view of a tooltip the user is now reading, not hunting for; real-org feedback
+ * asked for it to disappear at that point in favor of the normal cursor. `holdKeyActive`
+ * always counts as "searching" regardless of pin state (pressing hold to move an
+ * already-pinned tooltip elsewhere IS active searching, even though something is still
+ * showing at that exact instant); toggle mode alone only counts while nothing is
+ * pinned yet. Called at every state transition that could flip this: entering/exiting
+ * toggle mode, hold key down/up, a resolve landing, and the tooltip clearing.
+ */
+function updateInspectorCursor() {
+  setInspectorCursor(holdKeyActive || (inspectionModeActive && currentTooltipText === null));
+}
+
+/** Matches a single configured key (`inspectorHotkey`/`holdHotkey`, e.g. "Alt", "Shift", "Control", "q") against a keydown/keyup event — shared by both, since both are bare (non-combo) hotkeys. */
+function matchesBareKey(configured: string | null, e: KeyboardEvent): boolean {
+  if (!configured) return false;
+  const key = configured === "Ctrl" ? "Control" : configured;
   return e.key.toUpperCase() === key.toUpperCase();
 }
 
@@ -137,25 +157,28 @@ function matchesCombo(combo: string, e: KeyboardEvent): boolean {
   );
 }
 
-/** Always Hover (no toggle key configured) resolves continuously; Inspection Mode only resolves while explicitly toggled on. Either way, disabled/Translation Mode always wins. */
+/** Always Hover (no toggle key configured) resolves continuously — unaffected by the sticky redesign below, it's a fundamentally different glance-and-go use case. Otherwise the engine is only live while actively pinned (toggle mode on) or actively searching (hold key held) — either way, disabled/Translation Mode always wins. */
 function isEngineLive(): boolean {
   if (!isEnabled || translationModeEnabled) return false;
-  return inspectorHotkey === null || inspectionModeActive;
+  return inspectorHotkey === null || inspectionModeActive || holdKeyActive;
 }
 
 function enterInspectionMode() {
   if (inspectionModeActive) return;
   inspectionModeActive = true;
-  setInspectorCursor(true);
   // Force a fresh resolve at the current position rather than trusting whatever
   // lastRawElement happened to hold from before the mode was entered.
   lastRawElement = null;
   inspectAt(lastMouseX, lastMouseY);
+  updateInspectorCursor();
 }
 
 /**
  * The single exit path for Inspection Mode — used by the toggle key, Escape, clicking
- * outside the tooltip, losing window focus, and settings changes alike. Guarding
+ * outside the tooltip, losing window focus, and settings changes alike. Fires whenever
+ * EITHER toggle mode is on OR a tooltip is currently pinned (DECISIONS.md #56) — the
+ * latter covers a tooltip pinned purely via a standalone `holdHotkey` peek, with toggle
+ * mode never engaged at all, which otherwise had no way to be dismissed. Guarding
  * `isEditingActive` HERE (rather than at every call site) is what makes all of those
  * paths safe to fire unconditionally mid-edit: this simply no-ops, the mode and the
  * tooltip stay exactly as they are, and whichever path tried to exit "wins" the next
@@ -165,7 +188,8 @@ function enterInspectionMode() {
  * from the mode, both real "inconsistent state" bugs.
  */
 function exitInspectionMode() {
-  if (!inspectionModeActive || isEditingActive) return;
+  if (isEditingActive) return;
+  if (!inspectionModeActive && currentTooltipText === null) return;
   inspectionModeActive = false;
   setInspectorCursor(false);
   clearTooltip();
@@ -198,7 +222,11 @@ window.addEventListener(
       requestCancelEdit();
       return;
     }
-    if (e.key === "Escape" && inspectionModeActive) {
+    // Escape closes whatever the hover engine currently has showing — toggle mode
+    // pinned, OR a tooltip pinned purely via a standalone holdHotkey peek (toggle mode
+    // never engaged) — exitInspectionMode's own guard (DECISIONS.md #56) now covers
+    // both, so this check just needs to know there's something TO close.
+    if (e.key === "Escape" && (inspectionModeActive || currentTooltipText !== null)) {
       exitInspectionMode();
       return;
     }
@@ -216,7 +244,20 @@ window.addEventListener(
       requestEditShortcut();
       return;
     }
-    if (isEnabled && !translationModeEnabled && inspectorHotkey && !e.repeat && matchesInspectorKey(e)) {
+    // Hold-to-move (DECISIONS.md #56): press-and-hold grants live retargeting
+    // regardless of toggle state — see isEngineLive()/handlePointerMove. `!e.repeat`
+    // matters here (unlike a simple boolean flip, OS key-repeat firing keydown
+    // continuously while held must not repeatedly force a resolve). Guarded by
+    // isTypingInPage() since the default holdHotkey (Shift) is a real modifier used
+    // constantly while typing (text selection, Shift+Enter) — must never hijack that.
+    if (isEnabled && !translationModeEnabled && !e.repeat && !isTypingInPage() && matchesBareKey(holdHotkey, e)) {
+      holdKeyActive = true;
+      lastRawElement = null;
+      inspectAt(lastMouseX, lastMouseY);
+      updateInspectorCursor();
+      return;
+    }
+    if (isEnabled && !translationModeEnabled && inspectorHotkey && !e.repeat && matchesBareKey(inspectorHotkey, e)) {
       if (inspectionModeActive) exitInspectionMode();
       else enterInspectionMode();
     }
@@ -224,9 +265,26 @@ window.addEventListener(
   true
 );
 
+window.addEventListener(
+  "keyup",
+  (e) => {
+    if (holdKeyActive && matchesBareKey(holdHotkey, e)) {
+      // Release freezes/pins the tooltip on whatever's currently shown — no further
+      // action needed, just stop granting live retargeting (isEngineLive/
+      // handlePointerMove read holdKeyActive directly).
+      holdKeyActive = false;
+      updateInspectorCursor();
+    }
+  },
+  true
+);
+
 // Alt+Tab, clicking a native browser dialog, etc. — never leave Inspection Mode (and
 // its magnifier cursor) stuck on when focus leaves the page entirely.
-window.addEventListener("blur", exitInspectionMode);
+window.addEventListener("blur", () => {
+  holdKeyActive = false;
+  exitInspectionMode();
+});
 
 // A click OUTSIDE the tooltip ends Inspection Mode / closes the Translation Mode
 // click-editor — the explicit "I'm done here" signal. The tooltip is now a SOLID
@@ -239,14 +297,17 @@ window.addEventListener("blur", exitInspectionMode);
 // click on genuinely different page content (target ≠ shadowHost), Escape, or the
 // toggle key closes it now. See DECISIONS.md #54. While editing, an outside click
 // cancels the edit (requestCancelEdit) instead of being inert — same reasoning as the
-// Escape branch above, see DECISIONS.md #55.
+// Escape branch above, see DECISIONS.md #55. exitInspectionMode() is called
+// unconditionally (no `if (inspectionModeActive)` guard) — its own internal check
+// (DECISIONS.md #56) already covers "close whatever's showing, toggle-pinned or
+// standalone-hold-pinned alike," same reasoning as the Escape branch above.
 document.addEventListener("click", (e) => {
   if (shadowHost && e.target === shadowHost) return;
   if (isEditingActive) {
     requestCancelEdit();
     return;
   }
-  if (inspectionModeActive) exitInspectionMode();
+  exitInspectionMode();
   if (tmEditorOpen) closeTmEditor();
 });
 
@@ -295,10 +356,12 @@ function applyTranslationModeSetting(enabled: boolean) {
 
 function applyHotkeySettings(s: Settings | undefined) {
   inspectorHotkey = s?.inspectorHotkey === undefined ? "Alt" : s.inspectorHotkey;
+  holdHotkey = s?.holdHotkey === undefined ? "Shift" : s.holdHotkey;
   tmHotkey = s?.tmHotkey === undefined ? "Alt+T" : s.tmHotkey;
   // Any settings change resets to a known state rather than trying to preserve an
   // active mode across a rebind — simpler and safer than reconciling "was the key
   // that's currently held down still the key that's configured."
+  holdKeyActive = false;
   exitInspectionMode();
 }
 
@@ -358,6 +421,7 @@ function clearTooltip() {
   lastTooltipArgs = null;
   lastTmEditorArgs = null;
   ensureHost().render(null);
+  updateInspectorCursor();
 }
 
 /**
@@ -538,17 +602,18 @@ function requestEditShortcut() {
  *   until it finishes).
  * - Same text as already shown → no-op: the tooltip stays rock-stable instead of
  *   re-rendering and jumping around while the pointer travels within an element.
- * - Nothing resolvable → Always Hover fades it out after a grace period (unchanged
- *   from before); Inspection Mode instead just keeps showing whatever was last
- *   resolved — the whole point of the mode is a stable, pinned tooltip that only
- *   changes on a genuinely new target or an explicit exit, never on "the cursor
- *   currently happens to be over blank space."
+ * - Nothing resolvable → ONLY true Always Hover (`inspectorHotkey === null`) fades it
+ *   out after a grace period; toggle mode OR an active hold-peek instead just keep
+ *   showing whatever was last resolved (DECISIONS.md #56 — the whole point of a
+ *   pinned tooltip is that it only changes on a genuinely new target or an explicit
+ *   exit, never on "the cursor currently happens to be over blank space" while hunting
+ *   for the next thing to pin).
  */
 function inspectAt(x: number, y: number) {
   if (isEditingActive) return;
   const target = resolveHoverTarget(x, y);
   if (!target) {
-    if (!inspectionModeActive) scheduleClear();
+    if (inspectorHotkey === null) scheduleClear();
     return;
   }
   if (target.text === currentTooltipText) {
@@ -560,15 +625,16 @@ function inspectAt(x: number, y: number) {
     (response: ResolveTextResponse | undefined) => {
       if (isEditingActive) return; // an edit could have started while this round trip was in flight
       // No match (or context-based suppression) → show NOTHING (Always Hover) or
-      // KEEP the last tooltip (Inspection Mode) — never a wrong guess either way
+      // KEEP the last tooltip (toggle/hold) — never a wrong guess either way
       // (lesson #31's "controlled metadata only" bar).
       if (chrome.runtime.lastError || !response || response.candidates.length === 0) {
-        if (!inspectionModeActive) scheduleClear();
+        if (inspectorHotkey === null) scheduleClear();
         return;
       }
       cancelScheduledClear();
       currentTooltipText = target.text;
       showTooltip(target.text, x, y, response);
+      updateInspectorCursor();
     }
   );
 }
@@ -578,9 +644,9 @@ function inspectAt(x: number, y: number) {
  * enough to smooth over a single frame's pixel-boundary jitter right at its edge, not
  * a large dead zone. Real "am I over the tooltip" ownership is decided by identity
  * (`rawEl === shadowHost` in handlePointerMove below), which is exact and — since the
- * tooltip's non-interactive surface is `pointer-events: none` (see tooltip.css) — only
- * true over its actual buttons/textarea. This margin only matters for the sliver of
- * travel immediately approaching one of those controls.
+ * tooltip is now a SOLID surface (DECISIONS.md #54/#56, tooltip.css) — true across its
+ * ENTIRE box, not just its buttons/textarea like when it used to be pass-through. This
+ * margin only smooths the last sliver of travel right at the edge.
  */
 function isWithinTooltipZone(x: number, y: number): boolean {
   if (!tooltipRect) return false;
@@ -595,29 +661,25 @@ function isWithinTooltipZone(x: number, y: number): boolean {
 
 /**
  * The single entry point every pointer-position change (mousemove, scroll) funnels
- * through. Layered checks, cheapest first, each one a deliberate fix for a specific
- * reported failure mode:
+ * through. Layered checks, cheapest first:
  *  1. Mid-edit → do nothing at all (ownership: an active edit owns the tooltip).
- *  2. Engine not live (disabled, Translation Mode on, or a keyed Inspection Mode
- *     that hasn't been toggled on) → nothing to do.
- *  3. Exact identity check: the raw element under the cursor IS the tooltip's closed
- *     shadow host → stay pinned. Because the tooltip's background is
- *     `pointer-events: none`, this is ONLY true when actually over one of its real
- *     controls (a button, the edit textarea) — hovering the tooltip's background
- *     (which might be visually covering a different, real page element) correctly
- *     falls through to whatever's really there instead of being permanently stuck
- *     until the user clicks outside/Escape to reset.
- *  4. The small geometric margin (#isWithinTooltipZone) — smooths the last sliver of
- *     approach toward a control, not a blanket "anything near the tooltip is off
- *     limits" (that was the earlier version of this check; it also blocked reaching
- *     real content the tooltip merely happened to be rendered near, not just over).
- *  5. Cheapest real gate: has the raw element under the cursor actually changed since
+ *  2. Engine not live (disabled, Translation Mode on, or neither toggle mode nor a
+ *     hold-peek currently active) → nothing to do.
+ *  3. Exact identity / small margin (#isWithinTooltipZone) — stay pinned while over the
+ *     tooltip itself, now a solid surface end to end.
+ *  4. Cheapest real gate: has the raw element under the cursor actually changed since
  *     last time? If not, skip ALL further work — no text extraction, no attribute
- *     walks, no messaging. This is what replaced mouseover/mouseout: a native
- *     "did we enter a new element" event is unreliable through Lightning's nested
- *     shadow trees, but recomputing from coordinates every move and only acting on a
- *     genuine identity change is both more reliable AND (because most moves land on
- *     the same element as the last) cheaper than debouncing alone would be.
+ *     walks, no messaging (this is what replaced native mouseover/mouseout, unreliable
+ *     through Lightning's nested shadow trees).
+ *  5. Mode-specific retargeting (DECISIONS.md #56):
+ *     - Always Hover (`inspectorHotkey === null`): unchanged classic behavior — small
+ *       debounce, continuous, fades out on nothing found.
+ *     - `holdHotkey` held: LIVE, zero-debounce — the explicit "I'm searching" signal,
+ *       regardless of toggle state.
+ *     - Toggle mode on, not holding: STICKY — only resolves while NOTHING is pinned
+ *       yet (`currentTooltipText === null`, i.e. right after toggling on); once
+ *       something is shown, mouse movement alone never retargets it — only the hold
+ *       key, Escape, or an outside click can move or close it.
  */
 function handlePointerMove(x: number, y: number) {
   if (isEditingActive) return;
@@ -631,13 +693,17 @@ function handlePointerMove(x: number, y: number) {
   if (rawEl === lastRawElement) return;
   lastRawElement = rawEl;
 
-  window.clearTimeout(hoverTimer);
-  if (inspectionModeActive) {
-    // Inspection Mode = ZERO debounce: the mode being on IS the explicit request.
-    inspectAt(x, y);
-  } else {
-    // Always Hover keeps a small debounce so casual mouse travel across many
-    // elements doesn't resolve (and message the background) on every single one.
+  if (inspectorHotkey === null) {
+    // Always Hover: unchanged classic debounce.
+    window.clearTimeout(hoverTimer);
     hoverTimer = window.setTimeout(() => inspectAt(x, y), HOVER_DEBOUNCE_MS);
+  } else if (holdKeyActive) {
+    // Holding = zero-debounce live peek, regardless of toggle state.
+    window.clearTimeout(hoverTimer);
+    inspectAt(x, y);
+  } else if (inspectionModeActive && currentTooltipText === null) {
+    // Toggle mode's first catch only — sticky once pinned.
+    window.clearTimeout(hoverTimer);
+    inspectAt(x, y);
   }
 }
