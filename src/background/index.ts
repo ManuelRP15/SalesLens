@@ -135,6 +135,38 @@ function applySimpleScope(response: ResolveTextResponse, simpleMode: boolean): R
   return candidates.length === response.candidates.length ? response : { candidates, highConfidence: false };
 }
 
+/** The Translation Health signals (missing/identical + duplicate clusters) for a set of
+ * entries — the ONE place both are computed, so the real-data path and the startup seed
+ * below can't drift apart (they'd otherwise each hold a copy, DECISIONS.md #64/E1). */
+function computeHealthPayload(entries: LabelEntry[], settings: Settings) {
+  return {
+    translationHealth: computeTranslationHealth(entries, settings.activeLanguages, settings.simpleMode),
+    duplicateClusters: computeDuplicateClusters(entries, settings.activeLanguages, settings.simpleMode),
+  };
+}
+
+/**
+ * Ensures the Health page is never a dead "No data yet" screen before a live org fetch.
+ * Hover already works against the mock index in dev (`allEntries = MOCK` at load); Health
+ * didn't, because its data was only ever written on a real fetch/save — so the whole
+ * feature (missing/identical AND the new Duplicated check) was invisible without a live
+ * org. This backfills the signals on startup from the best index available — restored
+ * REAL cache if present (which also backfills `duplicateClusters` for users whose cache
+ * predates it), otherwise the mock set — and never clobbers an already-complete payload.
+ * A real `loadLabels`/save overwrites it immediately.
+ */
+async function seedHealthIfMissing(): Promise<void> {
+  const stored = await chrome.storage.local.get(["translationHealth", "duplicateClusters", "cachedEntries"]);
+  const hasHealth = Array.isArray(stored.translationHealth) && stored.translationHealth.length > 0;
+  const hasDupes = stored.duplicateClusters !== undefined;
+  if (hasHealth && hasDupes) return;
+  const cached = stored.cachedEntries as LabelEntry[] | undefined;
+  const entries = cached && cached.length > 0 ? cached : MOCK_LABEL_ENTRIES;
+  const settings = await getSettings();
+  await chrome.storage.local.set(computeHealthPayload(entries, settings));
+}
+void seedHealthIfMissing();
+
 async function setIndexFromRealData(entries: LabelEntry[]): Promise<void> {
   allEntries = entries;
   reverseIndex = buildReverseIndex(entries);
@@ -145,13 +177,10 @@ async function setIndexFromRealData(entries: LabelEntry[]): Promise<void> {
   console.log("[STI] index rebuilt:", byType);
 
   const settings = await getSettings();
-  const translationHealth = computeTranslationHealth(entries, settings.activeLanguages, settings.simpleMode);
-  const duplicateClusters = computeDuplicateClusters(entries, settings.activeLanguages, settings.simpleMode);
   await chrome.storage.local.set({
     settings: { ...settings, lastIndexRefresh: Date.now() } satisfies Settings,
     cachedEntries: entries,
-    translationHealth,
-    duplicateClusters,
+    ...computeHealthPayload(entries, settings),
   });
 }
 

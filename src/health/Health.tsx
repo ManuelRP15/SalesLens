@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { DuplicateCluster, DuplicateClusterReport, LabelType, Settings, TranslationHealthEntry } from "../shared/types";
 import { TYPE_COLORS, TYPE_LABELS } from "../content/tooltip-constants";
 
@@ -87,6 +87,18 @@ function renderClusterList(label: string, clusters: DuplicateCluster[]) {
   );
 }
 
+/** A single at-a-glance figure in the overview strip. Typographic emphasis only (a big
+ * number + a quiet label), never a coloured tile — a report, not a dashboard (P6/#62). */
+function SummaryStat({ label, value, tone }: { label: string; value: number; tone: "neutral" | "ok" | "warn" | "soft" }) {
+  const color = tone === "warn" ? "#a06400" : tone === "soft" ? "#b8860b" : tone === "ok" ? "#1a7f4e" : "#514f4d";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", minWidth: 90 }}>
+      <span style={{ fontSize: 22, fontWeight: 700, color, lineHeight: 1.1 }}>{value}</span>
+      <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.3, color: "#706e6b" }}>{label}</span>
+    </div>
+  );
+}
+
 export function Health() {
   const [state, setState] = useState<LoadedState | null>(null);
   const [expandedLang, setExpandedLang] = useState<string | null>(null);
@@ -115,6 +127,11 @@ export function Health() {
   // Language + Missing + [Possibly untranslated] + Duplicated + Coverage.
   const detailColSpan = flagIdentical ? 5 : 4;
 
+  // Org-wide overview counts (distinct elements affected, and total duplicate clusters).
+  const elementsMissing = entries.filter((e) => e.missingLanguages.length > 0).length;
+  const elementsIdentical = entries.filter((e) => e.identicalToSourceLanguages.length > 0).length;
+  const duplicateClusterCount = Object.values(duplicates).reduce((sum, clusters) => sum + clusters.length, 0);
+
   return (
     <div style={{ padding: 24, maxWidth: 820, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -133,9 +150,28 @@ export function Health() {
           Refresh
         </button>
       </div>
-      <p style={{ color: "#706e6b", fontSize: 13 }}>
+      <p style={{ color: "#706e6b", fontSize: 13, margin: "4px 0 0" }}>
         {entries.length} tracked element(s) across {languages.length} active language(s).
       </p>
+
+      <div
+        style={{
+          display: "flex",
+          gap: 28,
+          flexWrap: "wrap",
+          padding: "14px 0",
+          margin: "10px 0",
+          borderTop: "1px solid #eef1f6",
+          borderBottom: "1px solid #eef1f6",
+        }}
+      >
+        <SummaryStat label="Elements" value={entries.length} tone="neutral" />
+        <SummaryStat label="Missing ≥1 lang" value={elementsMissing} tone={elementsMissing > 0 ? "warn" : "ok"} />
+        {flagIdentical && (
+          <SummaryStat label="Possibly untranslated" value={elementsIdentical} tone={elementsIdentical > 0 ? "soft" : "ok"} />
+        )}
+        <SummaryStat label="Duplicated values" value={duplicateClusterCount} tone={duplicateClusterCount > 0 ? "soft" : "ok"} />
+      </div>
 
       <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}>
         <thead>
@@ -155,9 +191,8 @@ export function Health() {
             const coverage = Math.round(((entries.length - missing.length) / entries.length) * 100);
             const isExpanded = expandedLang === lang;
             return (
-              <>
+              <Fragment key={lang}>
                 <tr
-                  key={lang}
                   onClick={() => setExpandedLang(isExpanded ? null : lang)}
                   style={{ borderBottom: "1px solid #eef1f6", cursor: "pointer" }}
                 >
@@ -192,7 +227,7 @@ export function Health() {
                   </td>
                 </tr>
                 {isExpanded && (
-                  <tr key={`${lang}-details`}>
+                  <tr>
                     <td colSpan={detailColSpan} style={{ padding: "4px 6px 14px 24px", background: "#f9fafb" }}>
                       {missing.length === 0 && identical.length === 0 && dupes.length === 0 ? (
                         <span style={{ color: "#1a7f4e", fontSize: 13 }}>Everything translated ✓</span>
@@ -208,7 +243,7 @@ export function Health() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             );
           })}
         </tbody>
