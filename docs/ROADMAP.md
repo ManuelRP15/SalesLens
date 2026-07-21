@@ -36,7 +36,7 @@ marked "done" before 2026-07-21 is off by default without checking.
 | 13 | Smart Search | ⬜ pending | — |
 | 14 | Productivity Actions | 🟡 Copy API Name done; Copy SOQL/XML **removed** 2026-07-21 (DECISIONS.md #56 — kept the extension simple per direct product feedback); export pending | — |
 | 15 | Dependency Inspector | ⬜ pending | ⚠️ feasibility unconfirmed |
-| 16 | Workspace / Metadata Basket / package.xml Builder | ⬜ pending | **Muy Alta** |
+| 16 | Workspace / Metadata Basket / package.xml Builder | 🟡 v1 shipped 2026-07-22 (`DECISIONS.md #65`): silent capture on every save, Workspace page (before/after comparator, remove, two-stage clear), package.xml + JSON export | Safe Undo, tooltip "add to Workspace", JSON import pending |
 | 17 | Keyboard-First Experience | 🟡 Enter-to-edit shipped; save/cancel already worked; hold-vs-toggle hover redesign shipped 2026-07-21 (DECISIONS.md #56); shortcut settings UX simplified + mutual conflict prevention shipped 2026-07-21 (DECISIONS.md #57); arrow-key navigation still pending | **Muy Alta** |
 | 18 | Translation Audit & Guided Navigation ("Translate All" evolution, absorbs the old "Translation Navigator") | 🟡 v1 shipped 2026-07-21 (`#60`); first real-org bug round fixed same day (`#61`): sticky-header scroll correction, editor-closes-on-click root cause (Dynamic Hover parity), Complete-tab overflow, session-local translation scope toggle (All fields/Current only) | Duplicated filter designed but deferred (needs its own real-org check); Page Coverage stat line folded into the panel header instead of a separate feature |
 | 19 | Hover History & Favorites | ⬜ pending | Alta |
@@ -416,6 +416,18 @@ until the feasibility spike above runs; don't commit to this list in the UI unti
 confirmed.
 
 ### PHASE 16 — Workspace, Metadata Basket & Automatic package.xml Builder
+**🟡 v1 shipped 2026-07-22 (`DECISIONS.md #65`).** Shipped: automatic capture of every
+successful translation save (background choke point), the Workspace page
+(`src/workspace/`, popup-opened like Health) with before→after values, per-item remove,
+two-stage clear, and package.xml + JSON export built from the write path's own
+dependency mapping (`shared/workspace.ts`, unit-tested; page G-PO-verified via
+`workspace-harness/`). Deliberately deferred, in order: **Safe Undo** (write path —
+wants its own round with real-org testing; its prerequisite, original-value capture,
+ships in v1), an explicit **"add to Workspace"** action from the tooltip/inspector
+(interaction surface — needs a dev-harness round), **JSON import** (export ships).
+Analytics not built (see below: only if it doesn't distract). Original phase spec kept
+below for those follow-ups.
+
 **Muy Alta priority.** Backlog ideas #2 ("Package.xml Builder Automático") and #3
 ("Workspace Persistente"), the separately pasted "Workspace (Sesión de Trabajo)"
 concept doc, and the chat-summarized "Metadata Basket" are the same feature described

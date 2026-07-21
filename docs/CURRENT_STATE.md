@@ -3,7 +3,7 @@
 *Read this first, every session, before anything else — it's short on purpose.*
 *Update it last, every session, before ending — see `WORKFLOW.md` for the exact steps.*
 
-**Last updated:** 2026-07-21 (state reset — `DECISIONS.md #64`)
+**Last updated:** 2026-07-22 (state reset `#64` + Workspace v1 `#65`)
 
 ## The fact that governs everything else
 
@@ -14,10 +14,13 @@ reconciling CURRENT PRODUCT STATE (`.factory/METHODOLOGY.md §0`).
 
 ## Active work
 
-`refactor/local-state-reset` (off `main`) — the reset session (`#64`): landed `#63`
-(which had been sitting uncommitted in the working tree), reverted Translation Health v2
-out of the mainline (epic retired + archived), factory V1.2. Next: **PHASE 16 Workspace**
-as its own epic on `feature/workspace`, branched off the reset branch.
+`feature/workspace` (off `refactor/local-state-reset`, off `main`) — **checked out
+locally; this IS the current product state.** Two things happened in one session:
+1. The reset (`#64`): landed `#63` (was uncommitted), reverted Translation Health v2
+   out of the mainline (epic retired + archived), factory V1.2.
+2. **Workspace v1 shipped (`#65`, PHASE 16):** every successful translation save is
+   captured automatically; the Workspace page (popup → "Open Workspace") shows
+   before/after per edit and exports package.xml/JSON. Awaiting real-org testing.
 
 ## Git state after the reset
 
@@ -51,6 +54,9 @@ INTERACTION only, never metadata correctness.
 
 ## Known gaps / untested — check before assuming something works
 
+- **Workspace capture is real-org-only** (`#65`): the page + logic are harness/unit
+  verified, but nothing has exercised a real save→capture→page round trip yet. The
+  first real-org edit should appear in the Workspace on its own — verify that first.
 - **Nothing is verified against a real Salesforce org since `#61`/`#62`.** `#63`'s
   interaction work is harness-verified (inside clicks on both surfaces, two-stage outside
   click, Escape ladder, guided navigation, scroll-anchored following, filters, keyboard
@@ -68,7 +74,9 @@ INTERACTION only, never metadata correctness.
 
 ## Immediate next step
 
-The **PHASE 16 Workspace epic** (`feature/workspace`): silent tracking of every
-translation edit into a Metadata Basket, a Workspace page (health-page pattern) with
-before/after values, and package.xml export. Then: real-org click-through of `#63` + the
-Workspace, PHASE 6c, PHASE 11's cosmetic remainder.
+1. **Owner real-org round:** load `dist/` from this branch, click through `#63`'s
+   interaction model AND `#65`'s Workspace (edit → appears in Workspace → download
+   package.xml). Checklists are in the two open PRs.
+2. Merge the reset PR first, then the Workspace PR.
+3. After that: Workspace follow-ups in order (Safe Undo → tooltip "add to Workspace" →
+   JSON import, see PHASE 16), PHASE 6c, PHASE 11's cosmetic remainder.
