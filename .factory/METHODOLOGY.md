@@ -82,6 +82,7 @@ exactly one gate.
 | **G2** | Implementation | `npx tsc --noEmit` clean, `npx vitest run` green, `npm run build` succeeds. Unrelated files untouched. | all |
 | **G3** | Review | Correctness, duplication, edge cases, error handling, regressions reviewed; findings fixed or consciously deferred with a reason. | T2, T3 (T1: inline self-review) |
 | **G4** | Verification | The change is *actually exercised* — see the boundary below. | all |
+| **G-PO** | **Product Outcome** | For user-facing work: the intended observable behavior is DEMONSTRATED (real-org / rendered harness / screenshot), the change is present in a runnable artifact the user can load, and the factory can name *what behavior the user gained* and *where they see it*. Green gates + existing code do NOT close this. | every user-facing task |
 | **G5** | Documentation | The right `docs/*.md` updated per `WORKFLOW.md`'s ownership table, same turn. | any task that changed a rule, decision, state, or roadmap item |
 | **G6** | Delivery | Focused commit(s), correctly-named branch, PR body per `.github/PULL_REQUEST_TEMPLATE.md`. | T1+ (T0 usually rides an existing branch) |
 | **G7** | Human acceptance | The human has verified real-world behavior and accepted. | T2, T3, and anything real-org-dependent |
@@ -106,6 +107,50 @@ Verification splits in two, and the factory is scrupulous about which side it's 
 This boundary is not a limitation to apologize for — it is the discipline the project's
 whole history asked for. Read `CURRENT_STATE.md`'s "Known gaps / untested" list: that list
 is G4's real-world side, tracked honestly, and the factory keeps it that way.
+
+### G-PO — Product Outcome (the gate this factory was missing)
+
+**Run 1 exposed the exact failure this gate exists to prevent:** an epic passed G2
+(tsc/tests/build), G3 (review), and G5 (docs) — and was reported **DONE** — while the
+user-facing product was *practically unchanged*. The code that *produces* the outcome
+existed and was unit-tested; the outcome was never delivered. Three things had gone wrong
+at once and no gate looked for any of them: the change lived only on an unmerged branch the
+user wasn't running; the page it touched only populated from live data the factory can't
+produce; and the sample data didn't exercise the feature. **Green machine gates measured
+the wrong thing.** G4 verifies *the code runs*; G-PO verifies *the user gained something*.
+
+For any user-facing change, DONE requires answering three questions **concretely**:
+1. **What observable behavior did the user gain?** One sentence, in user terms ("the Health
+   page now shows which elements share a translation"), not implementation terms
+   ("`computeDuplicateClusters` is called").
+2. **Where in the product do they see/interact with it?** A specific surface and how to
+   reach it. If you can't point to it, it isn't wired up.
+3. **Is it demonstrated?** Not "the code exists" — actually *observed*: a real-org run, a
+   rendered harness, or a screenshot. If the change can't be shown without a live system the
+   factory lacks, **build the means to demonstrate it** (a preview harness that feeds
+   representative data) — that harness is reusable and *is* the gate. (Run 1's completion
+   built exactly this for the Health page, and it caught a real render bug the machine gates
+   never saw — proof the gate earns its place.)
+
+If any answer is missing or hand-wavy, the epic is **NOT done** — it is blocked on Product
+Outcome, and the honest report says so.
+
+### Verification tiers — state which one, never blur them
+
+Ranked. A higher tier does not make a lower one skippable, and **no lower tier implies the
+top.** Report every user-facing change against this ladder explicitly:
+
+- **code-exists** — the producing code is written. *Means nothing on its own.*
+- **machine-verified** — tsc / unit tests / build pass. *Proves the logic, not the outcome.*
+- **harness-verified** — the real component/behavior was exercised and **observed** against
+  representative data (rendered UI, driven interaction). *Proves the outcome is REACHABLE.*
+- **real-org-verified** — observed in the live target system. The factory usually can't close
+  this; it hands off a checklist (G7).
+- **product-outcome-observed** — a human (or a screenshot they can see) confirmed the intended
+  behavior in the actual product.
+
+"85 tests pass" is machine-verified; it is **not** evidence the user gained anything. The
+reflex: after "the code is done," ask *"where's the rendered proof?"* before writing DONE.
 
 ---
 
@@ -160,6 +205,14 @@ gate, not from the top.
 
 ## 5. What the factory is NOT allowed to do
 
+- **Report a user-facing task DONE without closing G-PO** — a demonstrated, reachable,
+  observable outcome. Green machine gates are not a substitute (the run-1 failure).
+- **Leave a user-facing change stranded** on an unmerged / unbuilt / un-run branch and call
+  it delivered. "Where can the user see it?" must have a concrete answer.
+- **Choose a low-visibility epic because its core is easy to unit-test.** That optimizes for
+  what the factory can prove over what the user can feel (run-1 lesson). If the best framing
+  of an epic is "one more column on a secondary page," scope it up to a visible outcome or
+  say so plainly — verifiability is a tiebreaker in selection, not the objective.
 - Merge to `main` on its own initiative (G7 is the human's — `WORKFLOW.md`).
 - Force-push, `--no-verify`, or weaken a test to make a gate pass.
 - Add a metadata type / edit affordance without a real write path (`ARCHITECTURE.md`

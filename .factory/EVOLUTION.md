@@ -14,6 +14,51 @@ throughput. Self-improvement is a suggestion engine, not an autonomous rewrite.
 
 ---
 
+## Run 1 retrospective — what the first real epic taught (V1.1)
+
+The first production epic (Translation Health "Duplicated detection") was reported **DONE**
+while the user-facing product was **practically unchanged**. Owning that failure produced
+two V1.1 improvements, both now landed.
+
+### A. The Product Outcome gate (fix shipped)
+
+**Root cause:** the factory's Definition of Done had no gate for *"did the user actually
+gain the intended behavior?"*. Every machine/review/docs gate passed while the outcome was
+undelivered — the change was stranded on an unmerged branch, the surface only populated from
+live data the factory can't produce, and the sample data didn't exercise the feature.
+**Fix:** `METHODOLOGY.md` now has **gate G-PO (Product Outcome)** + a **verification-tier
+ladder** (code-exists < machine < harness < real-org < product-outcome-observed), the
+orchestrator skill enforces both, and the report format requires stating *what the user
+gained* and *where they see it*. Demonstrated its worth immediately: building a preview
+harness to satisfy G-PO caught a real render bug the machine gates never saw.
+
+### B. Token efficiency — run 1 as a BASELINE, not the target
+
+Run 1 spent far more context than steady-state should. Where it went, and the fix:
+
+| Waste in run 1 | Fix (now factory practice) |
+|---|---|
+| **Broad upfront ingestion** — read most of the doc set at once. | Some was unavoidable for a *first* run; steady state uses **targeted retrieval**: `CURRENT_STATE.md` first, then grep/route per the adapter table — full docs only when the task type demands it. |
+| **Path-duplicated reads** — read `Health.tsx`/`background`/`types` from the primary path while planning, then **re-read** them from the worktree path before editing. | **One working location per task; read each file once.** Don't split reads across a worktree and its primary. |
+| **Subagent context reconstruction** — the reviewer cold-started and **re-read `ARCHITECTURE`/`DECISIONS`/`PROFILE`** the main agent already held (~85k tokens for a ~400-line diff). | Don't spawn when the main session holds the context; if you do, **pass the needed context inline** (the diff + the specific rules) and tell it *not* to re-ingest the doc set. For a small diff, inline self-review is cheaper and sufficient. |
+| **Tooling thrash** — repeated junction attempts (class-e) before falling back to `npm ci`. | Classify class-(e) fast and switch approach; don't retry a failing environment op. |
+| **Redundant full-suite runs.** | **Targeted tests while iterating, full suite once at the end.** |
+
+**Explicit evolution goal (tracked here):** *each iteration should deliver equal or better
+software quality with less unnecessary context consumption and fewer redundant operations.*
+The factory should get better at answering **"what do I need to know to do this task well?"**
+rather than "read everything just in case." Concrete levers: targeted retrieval over broad
+ingestion; reuse in-session context; scale analysis and agent count to the risk tier; persist
+durable knowledge to `docs/` (already the system) so it's never re-derived; prefer the
+smallest agent set that reaches the required quality.
+
+**Guardrail — the priority order is fixed and efficiency is LAST:** correct product outcome
+> quality/robustness > proper verification > efficient context use. Never trade any of the
+first three for tokens. A cheaper run that ships an unverified or invisible outcome is the
+run-1 failure again, not progress.
+
+---
+
 ## V1 — Orchestrated development (this version) ✅
 
 **What it is:** a single human entry point (`/factory`), risk-based routing, explicit

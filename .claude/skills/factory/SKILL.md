@@ -50,6 +50,21 @@ Split verification per `METHODOLOGY.md §2`:
   org (resolution correctness, saves, real Lightning DOM, focus events) → produce an exact
   **Manual Testing** checklist and stop at G7. **Never report real-org-verified.**
 
+### 3b. Product Outcome (gate G-PO — for ANY user-facing change; `METHODOLOGY.md`)
+Machine-green is not delivery. Before DONE, answer three questions concretely, or the epic
+is blocked on G-PO:
+- **What observable behavior did the user gain?** (one sentence, user terms)
+- **Where do they see/interact with it?** (a specific surface + how to reach it)
+- **Is it demonstrated?** Actually *observe* it — render the surface (build a preview harness
+  that feeds representative data if there's no live system: e.g. `health-harness/` renders the
+  real `<Health/>`), drive it, read it back (`read_page`/`get_page_text`), screenshot. "The
+  code exists / tests pass" is NOT a demonstration.
+- **Is it in a runnable artifact the user can load?** A change stranded on an unmerged/unbuilt
+  branch is not delivered — say exactly where the user runs it (branch, `dist/`, worktree).
+
+Report against the **verification tier ladder** (code-exists < machine < harness < real-org <
+product-outcome-observed) — state which tier each change reached; never blur them.
+
 ### 4. On failure, classify before fixing (`METHODOLOGY.md §3`)
 Class (a) impl bug → self-correct, **max 2 cycles**. Class (b) missing requirement / (c)
 architectural mismatch / (d) product ambiguity → **stop and escalate**, don't fix harder.
@@ -65,7 +80,9 @@ preference pattern emerged, propose a `PROFILE.md` update (never auto-apply).
 ```
 DONE
 Implemented:    …
-Verified:       machine: <what ran, what it proves> | real-org needed: <checklist>
+User gains:     <observable behavior, in user terms> — for user-facing work, REQUIRED (G-PO)
+See it at:      <surface + how to reach it + which branch/dist/artifact to run> — REQUIRED
+Verified:       tier per change — machine / harness (how observed) / real-org needed: <checklist>
 Changed:        files + docs
 Tests:          pass / added
 PR:             branch / link, or "not opened — <why>"
