@@ -130,13 +130,6 @@
   gap: 1px;
 }
 
-.sti-customized-mark {
-  color: #7c3aed;
-  font-size: 10px;
-  margin-left: 3px;
-  cursor: help;
-}
-
 .sti-field-type {
   font-size: 10px;
   color: #706e6b;
@@ -161,26 +154,6 @@
 
 .sti-copy-btn:hover {
   background: #dbe7fb;
-}
-
-.sti-copy-small-btn {
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: #706e6b;
-  background: #f3f2f2;
-  border: 1px solid #e5e5e5;
-  border-radius: 4px;
-  padding: 2px 5px;
-  cursor: pointer;
-  white-space: nowrap;
-  pointer-events: auto;
-}
-
-.sti-copy-small-btn:hover {
-  background: #e5e5e5;
-  color: #16325c;
 }
 
 .sti-copy-icon-btn {

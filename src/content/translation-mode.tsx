@@ -1,6 +1,6 @@
 import { collectTranslatableTargets, TRANSLATION_MODE_BADGE_ATTR } from "./dom-utils";
 import { langAccent, langHue } from "./tooltip-constants";
-import { isEditableLabelType, type ContextHints, type LabelEntry, type ResolveTextsBulkResponse, type TmPreset } from "../shared/types";
+import { isEditableEntry, type ContextHints, type LabelEntry, type ResolveTextsBulkResponse, type TmPreset } from "../shared/types";
 
 /** Fired when the user clicks an editable chip — content/index.tsx opens the same editor the hover tooltip uses, anchored at (x, y). */
 export type TmEditRequestHandler = (entry: LabelEntry, language: string, x: number, y: number) => void;
@@ -35,7 +35,6 @@ let observedShadowRoots = new WeakSet<ShadowRoot>();
 interface BadgeTranslation {
   lang: string;
   value: string;
-  customized: boolean;
 }
 
 const CHIP_BASE_CSS =
@@ -95,7 +94,7 @@ function buildLangDot(lang: string): HTMLSpanElement {
  * second, separately-built editing implementation living in raw DOM here.
  */
 function buildBadge(entry: LabelEntry, translations: BadgeTranslation[], style: TmStyle): HTMLSpanElement {
-  const editable = isEditableLabelType(entry.type) && Boolean(currentOnEditRequest);
+  const editable = isEditableEntry(entry) && Boolean(currentOnEditRequest);
   const badge = document.createElement("span");
   badge.setAttribute(TRANSLATION_MODE_BADGE_ATTR, "true");
   const isStacked = style.preset === "stacked";
@@ -109,7 +108,7 @@ function buildBadge(entry: LabelEntry, translations: BadgeTranslation[], style: 
       "vertical-align:baseline;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;" +
       "font-style:normal;font-weight:400;text-decoration:none;";
 
-  translations.forEach(({ lang, value, customized }, i) => {
+  translations.forEach(({ lang, value }, i) => {
     if (style.preset === "plain" && i > 0) {
       const sep = document.createElement("span");
       sep.textContent = "·";
@@ -119,11 +118,7 @@ function buildBadge(entry: LabelEntry, translations: BadgeTranslation[], style: 
 
     const chip = document.createElement("span");
     chip.style.cssText = chipCss(style.preset, lang) + (editable ? "cursor:pointer;" : "");
-    chip.title = editable
-      ? `${lang} — click to edit`
-      : customized
-        ? `${lang} — customized (Translation Workbench / Rename Tabs and Labels)`
-        : lang;
+    chip.title = editable ? `${lang} — click to edit` : lang;
 
     if (style.showFlags) chip.appendChild(buildLangDot(lang));
     if (style.showLangCodes) {
@@ -136,12 +131,6 @@ function buildBadge(entry: LabelEntry, translations: BadgeTranslation[], style: 
     text.textContent = value;
     chip.appendChild(text);
 
-    if (customized) {
-      const mark = document.createElement("span");
-      mark.textContent = "✎";
-      mark.style.cssText = "color:#7c3aed;font-size:9px;margin-left:2px;";
-      chip.appendChild(mark);
-    }
     if (editable) {
       const pencil = document.createElement("span");
       pencil.textContent = "✏";
@@ -216,7 +205,7 @@ async function scan() {
           if (result.candidates.length === 0) return;
           const entry = result.candidates[0];
           const translations: BadgeTranslation[] = currentActiveLanguages
-            .map((lang) => ({ lang, value: entry.valuesByLang[lang], customized: Boolean(entry.customizedLanguages?.includes(lang)) }))
+            .map((lang) => ({ lang, value: entry.valuesByLang[lang] }))
             .filter((t): t is BadgeTranslation => Boolean(t.value));
           if (translations.length === 0) return;
           const element = targets[i].element;
