@@ -52,8 +52,12 @@ to real user feedback instead of a fixed master plan.
    functional testing, and translation review. Must be easy to toggle on/off.
    *Status: shipped (v4, see ROADMAP.md PHASE 9) — popup toggle, configurable chip
    style, Custom Label editing, and (since `#58`) missing/identical-to-source signals
-   matching the tooltip's own (`#59`). This status line was stale until 2026-07-21;
-   don't trust a capability's status here without cross-checking ROADMAP.md's phase.*
+   matching the tooltip's own (`#59`). Evolved further 2026-07-21 (`#60`, ROADMAP.md
+   PHASE 18) into a guided audit workflow — filter to Missing/Identical/Complete,
+   step through issues, the page scrolls to and highlights each one, the existing
+   editor opens pre-seeded on the exact problem language, save and the count updates
+   live. This status line was stale until 2026-07-21; don't trust a capability's
+   status here without cross-checking ROADMAP.md's phase.*
 
 4. **Translation Health** — automatically analyze translation quality: untranslated
    languages, empty translations, translations identical to the source language
