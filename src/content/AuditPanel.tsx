@@ -1,5 +1,5 @@
 import { TYPE_COLORS, displayApiName, typeLabel } from "./tooltip-constants";
-import type { AuditEntry, AuditStatus } from "./translation-mode";
+import type { AuditEntry, AuditStatus, BadgeScope } from "./translation-mode";
 
 /** The audit panel's own filter axis — one tab per reliably-computed `AuditStatus`, plus "all". Deliberately NOT a larger set (no "needs attention" union, no Duplicated yet) — see ROADMAP.md PHASE 18 for why. */
 export type AuditFilter = "all" | AuditStatus;
@@ -37,6 +37,9 @@ export interface AuditPanelProps {
   onNavigate: (index: number, entry: AuditEntry) => void;
   expanded: boolean;
   onToggleExpanded: () => void;
+  /** "All fields" (default) badges every matched element on the page, same as classic Translation Mode. "Current only" declutters the page down to just the entry currently selected below — a live workflow toggle, not a persisted setting (ROADMAP.md PHASE 18 §4, DECISIONS.md #61). */
+  scope: BadgeScope;
+  onScopeChange: (scope: BadgeScope) => void;
 }
 
 /**
@@ -48,7 +51,17 @@ export interface AuditPanelProps {
  * calls back into content/index.tsx, which owns scrolling/highlighting/opening the
  * editor — the panel itself never touches the page DOM or the editor.
  */
-export function AuditPanel({ entries, filter, onFilterChange, currentIndex, onNavigate, expanded, onToggleExpanded }: AuditPanelProps) {
+export function AuditPanel({
+  entries,
+  filter,
+  onFilterChange,
+  currentIndex,
+  onNavigate,
+  expanded,
+  onToggleExpanded,
+  scope,
+  onScopeChange,
+}: AuditPanelProps) {
   const counts: Record<AuditFilter, number> = { all: entries.length, missing: 0, identical: 0, complete: 0 };
   for (const e of entries) counts[e.status]++;
 
@@ -71,9 +84,23 @@ export function AuditPanel({ entries, filter, onFilterChange, currentIndex, onNa
     <div className="sti-audit-panel" role="region" aria-label="Translate All audit">
       <div className="sti-audit-panel__header">
         <span className="sti-audit-panel__title">Translate All</span>
-        <button type="button" className="sti-audit-panel__collapse" onClick={onToggleExpanded} title="Collapse">
-          ▾
-        </button>
+        <span className="sti-audit-panel__header-actions">
+          <button
+            type="button"
+            className="sti-audit-scope-btn"
+            onClick={() => onScopeChange(scope === "all" ? "current" : "all")}
+            title={
+              scope === "all"
+                ? "Showing badges on every matched field — click to show only the current one"
+                : "Showing a badge only on the current field — click to show every matched field"
+            }
+          >
+            {scope === "all" ? "All fields" : "Current only"}
+          </button>
+          <button type="button" className="sti-audit-panel__collapse" onClick={onToggleExpanded} title="Collapse">
+            ▾
+          </button>
+        </span>
       </div>
 
       <div className="sti-audit-panel__tabs">
@@ -84,7 +111,8 @@ export function AuditPanel({ entries, filter, onFilterChange, currentIndex, onNa
             className={`sti-audit-tab${filter === value ? " sti-audit-tab--active" : ""}`}
             onClick={() => onFilterChange(value)}
           >
-            {label} <span className="sti-audit-tab__count">{counts[value]}</span>
+            <span className="sti-audit-tab__label">{label}</span>
+            <span className="sti-audit-tab__count">{counts[value]}</span>
           </button>
         ))}
       </div>

@@ -1,8 +1,8 @@
 import { createRoot, type Root } from "react-dom/client";
-import { deepElementFromPoint, resolveHoverTarget, guessObjectApiNameFromUrl } from "./dom-utils";
+import { deepElementFromPoint, resolveHoverTarget, guessObjectApiNameFromUrl, parentAcrossShadow } from "./dom-utils";
 import { Tooltip } from "./Tooltip";
 import tooltipCss from "./tooltip.css?inline";
-import { startTranslationMode, stopTranslationMode, type AuditEntry, type TmStyle } from "./translation-mode";
+import { startTranslationMode, stopTranslationMode, setBadgeScope, type AuditEntry, type BadgeScope, type TmStyle } from "./translation-mode";
 import { AuditPanel, type AuditFilter } from "./AuditPanel";
 import auditPanelCss from "./audit-panel.css?inline";
 import { normalizeBareKey } from "../shared/hotkeys";
@@ -31,6 +31,17 @@ const SCROLL_REINSPECT_MS = 80;
 // true "scroll finished" signal — same pragmatic-timing comfort as the constants
 // above, not a new kind of guess.
 const AUDIT_EDITOR_OPEN_DELAY_MS = 450;
+// How long to wait after triggering scrollIntoView before checking whether the
+// target actually ended up properly visible (DECISIONS.md #61's sticky-header fix)
+// — long enough for a "smooth" scroll to have settled in the common case.
+const SCROLL_SETTLE_CHECK_MS = 350;
+// A second, shorter wait after an actual corrective scroll, before it's safe to
+// anchor the editor to the target's (now-final) rect.
+const SCROLL_CORRECTION_SETTLE_MS = 220;
+// Minimum clearance kept between the target and the viewport's top/bottom edges —
+// not a large buffer, just enough that the target isn't touching pinned chrome or
+// the viewport edge itself.
+const SCROLL_VIEWPORT_MARGIN_PX = 12;
 // Small jitter-smoothing margin around the tooltip's own edges — NOT a large "stay
 // away" buffer (that was tried first and caused its own complaint: content the
 // tooltip merely rendered near, not literally over, became unreachable without a
@@ -114,11 +125,25 @@ let auditFilter: AuditFilter = "all";
 let auditIndex = 0;
 /** Collapsed by default (a small pill) — expands into the full panel on click. Reset to a fresh state (collapsed, "All", index 0) every time Translation Mode turns on, see `applyTranslationModeSetting`. */
 let auditExpanded = false;
+/**
+ * Translation scope (ROADMAP.md PHASE 18 §4, DECISIONS.md #61): whether the ON-PAGE
+ * inline badges show every matched field ("all", the classic Translation Mode
+ * behavior and the sensible default) or only the audit panel's current target
+ * ("current" — a decluttered view for working through the guided stepper without
+ * every other field's badge competing for attention). Deliberately session-local,
+ * NOT a persisted `Settings` field — this is a live workflow control the user flips
+ * while actively using Translate All, not a stable cross-session preference; resets
+ * to "all" every time Translation Mode turns on, same as the other audit UI state
+ * above. Only affects the on-page badges — the panel's own list/counts always show
+ * the full page regardless.
+ */
+let auditScope: BadgeScope = "all";
 /** The floating highlight overlay's own live DOM node + the element it's currently tracking, so `positionHighlight` can resync on scroll/resize and `clearHighlight` can tear both down together. Real page DOM touch — same accepted, fully-reversible exception Translation Mode's badges and the Inspection Mode magnifier cursor already use. */
 let highlightEl: HTMLDivElement | undefined;
 let highlightTarget: Element | null = null;
 let highlightRepositionHandler: (() => void) | undefined;
 let auditEditorOpenTimer: number | undefined;
+let auditScrollCorrectionTimer: number | undefined;
 
 document.addEventListener(
   "mousemove",
@@ -441,6 +466,22 @@ function highlightElement(el: Element) {
   window.addEventListener("resize", highlightRepositionHandler, { passive: true });
 }
 
+/** Same filter predicate `AuditPanel` itself applies — kept in sync here so `updateBadgeScope` (and anything else that needs "what's the current entry") agrees with what the panel is actually displaying. */
+function currentFilteredAuditEntries(): AuditEntry[] {
+  return auditFilter === "all" ? auditEntries : auditEntries.filter((e) => e.status === auditFilter);
+}
+
+function currentAuditEntry(): AuditEntry | undefined {
+  const list = currentFilteredAuditEntries();
+  if (list.length === 0) return undefined;
+  return list[Math.min(auditIndex, list.length - 1)];
+}
+
+/** Re-applies the translation-scope toggle to whatever the CURRENT entry now is — called after every navigation, filter change, rescan, and scope toggle itself, so "current only" mode never shows a stale target's badge. */
+function updateBadgeScope(focusedElement?: Element | null) {
+  setBadgeScope(auditScope, focusedElement !== undefined ? focusedElement : currentAuditEntry()?.element ?? null);
+}
+
 function renderAuditPanel() {
   ensureAuditHost().render(
     <AuditPanel
@@ -451,6 +492,8 @@ function renderAuditPanel() {
       onNavigate={handleAuditNavigate}
       expanded={auditExpanded}
       onToggleExpanded={handleAuditToggleExpanded}
+      scope={auditScope}
+      onScopeChange={handleAuditScopeChange}
     />
   );
 }
@@ -458,18 +501,112 @@ function renderAuditPanel() {
 function handleAuditUpdate(entries: AuditEntry[]) {
   auditEntries = entries;
   renderAuditPanel();
+  // A rescan can hand back a fresh element reference for the same logical entry
+  // (Lightning re-rendered that part of the DOM) — resync scope to the CURRENT
+  // entry's latest element rather than whatever `translation-mode.tsx` was last
+  // told about, which could now be detached.
+  updateBadgeScope();
 }
 
 function handleAuditFilterChange(filter: AuditFilter) {
+  // Switching filters is an explicit "I'm moving on" action, same as Next/Previous —
+  // cancels whatever's mid-edit rather than leaving it open on an entry the panel's
+  // own state no longer points at (DECISIONS.md #61, matches Escape/outside-click's
+  // existing cancel-on-explicit-action precedent, #55).
+  if (isEditingActive) requestCancelEdit();
   auditFilter = filter;
   auditIndex = 0;
   clearHighlight();
   renderAuditPanel();
+  updateBadgeScope();
+}
+
+function handleAuditScopeChange(scope: BadgeScope) {
+  auditScope = scope;
+  renderAuditPanel();
+  updateBadgeScope();
 }
 
 function handleAuditToggleExpanded() {
   auditExpanded = !auditExpanded;
   renderAuditPanel();
+}
+
+/**
+ * Finds the target's nearest REAL scrolling ancestor (an element that actually
+ * overflows and scrolls) — piercing shadow boundaries via the same
+ * `parentAcrossShadow` walk `dom-utils.ts` already uses for attribute lookups,
+ * since Lightning nests scroll containers inside open shadow roots (a related
+ * list's own internal scroll area, for instance) that a plain `parentElement` walk
+ * would miss entirely. Falls back to the document's own scrolling element — plain
+ * `window`/page scrolling — which covers the common case for most record-page
+ * content. `Element.scrollBy` works identically whether the result is that
+ * fallback or a real inner container, so callers never need to special-case it.
+ */
+function findScrollableAncestor(el: Element): Element {
+  let node: Element | null = parentAcrossShadow(el);
+  while (node) {
+    const style = getComputedStyle(node);
+    const canScrollY = /(auto|scroll|overlay)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1;
+    if (canScrollY) return node;
+    node = parentAcrossShadow(node);
+  }
+  return document.scrollingElement ?? document.documentElement;
+}
+
+/**
+ * How much of the viewport's TOP edge is currently obscured by pinned chrome
+ * (Salesforce's sticky global header, a record page's compact/sticky highlights
+ * panel once scrolled past its tall form, etc.) — sampled generically via
+ * `deepElementFromPoint` (pierces shadow roots, the same primitive the hover engine
+ * itself uses for hit-testing) rather than hardcoded Salesforce class names, which
+ * could break across orgs/themes/releases. Checks `position: fixed`/`sticky` on the
+ * hit element's own ancestor chain at a few x-offsets, since a single sample can
+ * miss a header that doesn't span the full width.
+ */
+function measureTopObstruction(): number {
+  let max = 0;
+  for (const fx of [0.1, 0.5, 0.9]) {
+    let node: Element | null = deepElementFromPoint(window.innerWidth * fx, 1);
+    let hops = 0;
+    while (node && hops < 10) {
+      const style = getComputedStyle(node);
+      if (style.position === "fixed" || style.position === "sticky") {
+        const rect = node.getBoundingClientRect();
+        if (rect.top <= 1 && rect.bottom > max) max = rect.bottom;
+      }
+      node = parentAcrossShadow(node);
+      hops++;
+    }
+  }
+  return max;
+}
+
+/**
+ * Verify-and-correct pass, run once a `scrollIntoView` call should have settled
+ * (DECISIONS.md #61) — never trust `scrollIntoView` alone against Salesforce's
+ * pinned/sticky headers and nested scroll containers. Real-org bug: navigating from
+ * a body element TO a header element visually identified and highlighted the right
+ * target, but the actual viewport never moved — `scrollIntoView`'s built-in
+ * ancestor walk can decide a `position: sticky` target is "already visible" (by its
+ * own bounding-rect math) even when it's covered by other pinned chrome, or resolve
+ * the wrong scrolling ancestor entirely in a nested-scroll-container page. This
+ * measures where the target ACTUALLY ended up; if it's covered by pinned chrome at
+ * the top or still past the bottom edge, applies a direct corrective scroll on the
+ * target's REAL scrolling ancestor (not assumed to be the window). Returns whether
+ * a correction was applied, so the caller can wait a little longer before anchoring
+ * the editor to the target's rect. Symmetric by construction — it doesn't care
+ * which direction the navigation came from, only where the target ended up.
+ */
+function ensureVisibleAboveObstruction(el: Element): boolean {
+  const minTop = measureTopObstruction() + SCROLL_VIEWPORT_MARGIN_PX;
+  const maxBottom = window.innerHeight - SCROLL_VIEWPORT_MARGIN_PX;
+  const rect = el.getBoundingClientRect();
+  if (rect.top >= minTop && rect.bottom <= maxBottom) return false;
+
+  const delta = rect.top < minTop ? rect.top - minTop : rect.bottom - maxBottom;
+  findScrollableAncestor(el).scrollBy({ top: delta, behavior: "auto" });
+  return true;
 }
 
 /**
@@ -480,13 +617,31 @@ function handleAuditToggleExpanded() {
  * `complete` entries (or a non-editable type, e.g. a standard field/picklist,
  * `ObjectLabel`) still scroll/highlight so the user can SEE it, but no editor
  * auto-opens — there's either nothing to fix or nothing to write back to yet.
+ *
+ * Navigating to a new entry is an explicit "I'm moving on" action — cancels
+ * whatever's mid-edit rather than silently refusing to open the new target's editor
+ * (`openTmEditor` itself guards `isEditingActive`, so without this the OLD editor
+ * would just sit there pointed at an entry the highlight/scroll already left).
  */
 function handleAuditNavigate(index: number, entry: AuditEntry) {
+  if (isEditingActive) requestCancelEdit();
   auditIndex = index;
   renderAuditPanel();
+  updateBadgeScope(entry.element);
   entry.element.scrollIntoView({ behavior: "smooth", block: "center" });
   highlightElement(entry.element);
   window.clearTimeout(auditEditorOpenTimer);
+  window.clearTimeout(auditScrollCorrectionTimer);
+  auditScrollCorrectionTimer = window.setTimeout(() => {
+    const corrected = ensureVisibleAboveObstruction(entry.element);
+    auditEditorOpenTimer = window.setTimeout(
+      () => openAuditEditorIfApplicable(entry),
+      corrected ? SCROLL_CORRECTION_SETTLE_MS : 0
+    );
+  }, SCROLL_SETTLE_CHECK_MS);
+}
+
+function openAuditEditorIfApplicable(entry: AuditEntry) {
   if (!entry.editable) return;
   const relevantLanguage =
     entry.status === "missing"
@@ -495,10 +650,8 @@ function handleAuditNavigate(index: number, entry: AuditEntry) {
         ? entry.identicalLanguages[0]
         : undefined;
   if (!relevantLanguage) return;
-  auditEditorOpenTimer = window.setTimeout(() => {
-    const rect = entry.element.getBoundingClientRect();
-    openTmEditor(entry.entry, relevantLanguage, rect.left + 12, rect.bottom + 8);
-  }, AUDIT_EDITOR_OPEN_DELAY_MS);
+  const rect = entry.element.getBoundingClientRect();
+  openTmEditor(entry.entry, relevantLanguage, rect.left + 12, rect.bottom + 8);
 }
 
 function applyTranslationModeSetting(enabled: boolean) {
@@ -513,6 +666,7 @@ function applyTranslationModeSetting(enabled: boolean) {
     auditFilter = "all";
     auditIndex = 0;
     auditExpanded = false;
+    auditScope = "all";
     renderAuditPanel();
     startTranslationMode(activeLanguages, tmStyle, openTmEditor, handleAuditUpdate);
   } else {
@@ -630,9 +784,23 @@ function clearTooltip() {
  * situations would leave a stale tooltip nothing else would ever clear: the engine
  * being idle (isEngineLive() false) is exactly why no further hover/scroll event
  * would trigger a clear on its own.
+ *
+ * Root-caused bug fix: `isEngineLive()` alone isn't the right guard here — it's
+ * ALWAYS false whenever Translation Mode is on (by design, TM suppresses the hover
+ * engine entirely), which used to mean finishing ANY edit inside the TM/audit-panel
+ * editor — even a completely benign one, like a textarea losing focus because the
+ * user clicked a DIFFERENT row's Copy button inside the SAME tooltip — tore the
+ * whole tooltip down immediately (`TranslationEditor`'s `onBlur={commit}` calls
+ * `onCancel()` when the value is unchanged, which sets `editingLang` to `null` and
+ * fires this reconcile). Dynamic Hover never hits this: there, `isEngineLive()`
+ * stays TRUE while Inspection Mode is toggled on, so finishing an edit correctly
+ * falls through to "keep showing it." The TM/audit editor's equivalent "should this
+ * still be showing" signal is `tmEditorOpen`, not the hover engine's liveness at
+ * all — checking it here is what brings this editor to true behavioral parity with
+ * Dynamic Hover's persistence model, not a separate one bolted on beside it.
  */
 function reconcileAfterEdit() {
-  if (!isEngineLive()) clearTooltip();
+  if (!isEngineLive() && !tmEditorOpen) clearTooltip();
 }
 
 /** Wraps the SAVE_TRANSLATION round trip in a Promise so Tooltip.tsx stays free of chrome.* calls — messaging is the content script's job, the tooltip only renders. */

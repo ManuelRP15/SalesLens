@@ -50,7 +50,7 @@ function extractOwnText(el: Element): string {
  * parent in the same tree (see lesson #29). `parentElement` must win first;
  * the host is only the fallback at the top of the current tree.
  */
-function parentAcrossShadow(node: Element): Element | null {
+export function parentAcrossShadow(node: Element): Element | null {
   if (node.parentElement) return node.parentElement;
   const root = node.getRootNode();
   return root instanceof ShadowRoot ? root.host : null;

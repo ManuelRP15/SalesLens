@@ -74,6 +74,32 @@
   font-size: 13px;
 }
 
+.sti-audit-panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Translation scope toggle (ROADMAP.md PHASE 18 §4) — one small button that flips
+   between its two states on click, deliberately not a radio group/settings panel:
+   "switching modes is easy" means one click, not opening a menu. */
+.sti-audit-scope-btn {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1a56db;
+  background: #eef3fd;
+  border: none;
+  border-radius: 999px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sti-audit-scope-btn:hover {
+  background: #dbe7fb;
+}
+
 .sti-audit-panel__collapse {
   font-family: inherit;
   font-size: 13px;
@@ -89,28 +115,52 @@
   background: #eef1f6;
 }
 
+/* Grid, not flex — a fixed number of EQUAL-width columns is what guarantees this
+   row's total width always exactly matches the stepper row's below it (same
+   container padding, same content edge), regardless of how long a language count
+   badge makes any one label. Flex's default (no wrap, no shrink) let the row
+   overflow past the panel's right edge whenever the 4 labels' natural widths summed
+   past the available space — the exact "Complete" misalignment this replaces. */
 .sti-audit-panel__tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 4px;
   padding: 0 12px 8px;
   flex: none;
 }
 
+/* Label and count stack vertically rather than sitting side by side — a real page
+   can easily have double-digit counts in every category, and "Identical 11" fighting
+   for width inside a quarter-panel column truncates awkwardly even with ellipsis.
+   Stacked, each column only ever needs to fit the WIDER of the two lines alone. */
 .sti-audit-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
   font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
   color: #514f4d;
   background: #f3f2f2;
   border: 1px solid transparent;
-  border-radius: 999px;
-  padding: 3px 9px;
+  border-radius: 8px;
+  padding: 4px 2px;
   cursor: pointer;
-  white-space: nowrap;
+  min-width: 0;
 }
 
 .sti-audit-tab:hover {
   background: #e9e8e8;
+}
+
+.sti-audit-tab__label {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .sti-audit-tab--active {
@@ -120,7 +170,8 @@
 }
 
 .sti-audit-tab__count {
-  opacity: 0.7;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .sti-audit-panel__empty {

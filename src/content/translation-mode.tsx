@@ -37,6 +37,9 @@ export interface AuditEntry {
 
 export type AuditUpdateHandler = (entries: AuditEntry[]) => void;
 
+/** "All fields" (default) annotates every matched element, same as always. "Current only" declutters the page down to just the audit panel's current target — see `setBadgeScope`. */
+export type BadgeScope = "all" | "current";
+
 // Short enough that opening a dropdown/menu annotates before the user closes it.
 const RESCAN_DEBOUNCE_MS = 250;
 // Elements that visually can't render appended children (or where doing so would be
@@ -238,6 +241,30 @@ function removeAllBadges() {
   for (const element of [...injectedBadges.keys()]) removeBadge(element);
 }
 
+let currentBadgeScope: BadgeScope = "all";
+let currentFocusedElement: Element | null = null;
+
+/** Applies the current scope to every currently-injected badge — a cheap, purely presentational `display:none` toggle. Re-run after every `scan()` (rebuilt badges default back to visible) and whenever `setBadgeScope` is called. Never touches the underlying scan/resolve data. */
+function applyBadgeScope() {
+  for (const [element, badge] of injectedBadges) {
+    const hide = currentBadgeScope === "current" && element !== currentFocusedElement;
+    badge.style.display = hide ? "none" : "";
+  }
+}
+
+/**
+ * Translation scope (ROADMAP.md PHASE 18 §4, DECISIONS.md #61): lets `content/
+ * index.tsx` declutter the page down to just the audit panel's current target
+ * without re-scanning or re-fetching anything — a pure visibility toggle over
+ * badges that are ALREADY built. The audit panel's own list/counts are unaffected
+ * either way; scope only changes what's visually injected onto Salesforce's DOM.
+ */
+export function setBadgeScope(scope: BadgeScope, focusedElement: Element | null) {
+  currentBadgeScope = scope;
+  currentFocusedElement = focusedElement;
+  applyBadgeScope();
+}
+
 function resolveTextsBulk(
   items: Array<{ text: string; hints: ContextHints }>
 ): Promise<ResolveTextsBulkResponse | undefined> {
@@ -327,6 +354,9 @@ async function scan() {
     for (const element of [...injectedBadges.keys()]) {
       if (!matchedElements.has(element)) removeBadge(element);
     }
+    // Rebuilt badges default to visible — reapply whatever scope was last set
+    // (e.g. "current only" mid-audit) so a rescan can't silently undo it.
+    applyBadgeScope();
 
     currentOnAuditUpdate?.([...auditByKey.values()]);
   } finally {
