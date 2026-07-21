@@ -115,6 +115,112 @@
   background: #eef1f6;
 }
 
+/* Integrated search (DECISIONS.md #62) — one always-visible box directly under the
+   header, above the tabs, because it filters the SAME set the tabs then narrow: the
+   visual order matches the logical order (search first, category second). No toggle,
+   no separate panel, no configuration. */
+.sti-audit-panel__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 12px 8px;
+  flex: none;
+}
+
+.sti-audit-search-input {
+  font-family: inherit;
+  font-size: 11.5px;
+  color: #16325c;
+  background: #f8f9fb;
+  border: 1px solid #e2e6ee;
+  border-radius: 6px;
+  padding: 5px 24px 5px 9px;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.sti-audit-search-input::placeholder {
+  color: #a5a3a1;
+}
+
+.sti-audit-search-input:focus {
+  border-color: #1a56db;
+  background: #ffffff;
+}
+
+.sti-audit-search-clear {
+  position: absolute;
+  right: 17px;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1;
+  color: #706e6b;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 3px;
+}
+
+.sti-audit-search-clear:hover {
+  background: #eef1f6;
+  color: #16325c;
+}
+
+/* Metadata-type chips (DECISIONS.md #63). Quiet by default — outline-only, uppercase,
+   small — so the row reads as a hint rather than a control panel; a SELECTED chip
+   takes its own metadata type's badge colours inline (see AuditPanel.tsx), which is
+   the only colour this row ever shows. Wraps rather than scrolls: on a real record
+   page this is 2-4 chips, and a horizontal scroller would hide filters that exist. */
+.sti-audit-panel__types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px 8px;
+  flex: none;
+}
+
+.sti-audit-type-chip {
+  font-family: inherit;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #706e6b;
+  background: transparent;
+  border: 1px solid #e2e6ee;
+  border-radius: 999px;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sti-audit-type-chip:hover {
+  background: #f3f5f8;
+  color: #16325c;
+}
+
+.sti-audit-type-chip--on {
+  border-color: transparent;
+}
+
+.sti-audit-type-clear {
+  font-family: inherit;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #1a56db;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.sti-audit-type-clear:hover {
+  text-decoration: underline;
+}
+
 /* Grid, not flex — a fixed number of EQUAL-width columns is what guarantees this
    row's total width always exactly matches the stepper row's below it (same
    container padding, same content edge), regardless of how long a language count
@@ -163,10 +269,34 @@
   max-width: 100%;
 }
 
+/* Semantic status colour, applied ONLY to the ACTIVE tab (DECISIONS.md #62): four
+   permanently-coloured tabs would be a dashboard — noise competing with the page —
+   but the selected one carrying its own status colour makes "which lens am I looking
+   through" readable without parsing the label, and matches the rail colour on every
+   row below it. "All" stays deliberately neutral: it isn't a status, it's the absence
+   of a filter. */
 .sti-audit-tab--active {
   background: #eef3fd;
   border-color: #d8e4fb;
   color: #1a56db;
+}
+
+.sti-audit-tab--missing.sti-audit-tab--active {
+  background: #fdecea;
+  border-color: #f6cfca;
+  color: #c0392b;
+}
+
+.sti-audit-tab--identical.sti-audit-tab--active {
+  background: #fdf6e3;
+  border-color: #f0e0b6;
+  color: #8a6400;
+}
+
+.sti-audit-tab--complete.sti-audit-tab--active {
+  background: #e8f6ee;
+  border-color: #c6e6d4;
+  color: #1a7f4e;
 }
 
 .sti-audit-tab__count {
@@ -222,6 +352,9 @@
   text-overflow: ellipsis;
 }
 
+/* The "current target" card carries the status colour on a left rail rather than as a
+   filled background — the same rail the list rows below use, so the eye reads one
+   consistent status language across the whole panel instead of two. */
 .sti-audit-panel__current {
   display: flex;
   flex-wrap: wrap;
@@ -231,6 +364,7 @@
   padding: 8px;
   background: #f9fafb;
   border: 1px solid #eef1f6;
+  border-left: 3px solid #d8dde6;
   border-radius: 6px;
   text-align: left;
   cursor: pointer;
@@ -238,8 +372,17 @@
   color: inherit;
 }
 
+.sti-audit-panel__current--missing { border-left-color: #c0392b; }
+.sti-audit-panel__current--identical { border-left-color: #b8860b; }
+.sti-audit-panel__current--complete { border-left-color: #1a7f4e; }
+
 .sti-audit-panel__current:hover {
   background: #f3f5f8;
+}
+
+.sti-audit-panel__readonly {
+  color: #706e6b;
+  font-style: italic;
 }
 
 .sti-audit-panel__current-name {
@@ -279,36 +422,67 @@
   border-top: 1px solid #eef1f6;
 }
 
+/* A continuous colour RAIL down the row's leading edge replaced the old 6px status dot
+   (DECISIONS.md #62): a dot is a single point the eye has to find and then decode,
+   whereas a rail turns a scrolling list into visible BANDS of same-status rows — which
+   is what "understand the page's translation state at a glance" actually requires.
+   Same colour vocabulary as the active tab and the current-target card, and still no
+   filled backgrounds, so the panel stays quiet next to Salesforce's own UI. */
 .sti-audit-panel__row {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
   box-sizing: border-box;
-  padding: 6px;
+  padding: 6px 6px 6px 8px;
   margin-top: 2px;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-left: 3px solid transparent;
+  border-radius: 0 4px 4px 0;
   cursor: pointer;
   font-family: inherit;
   color: inherit;
   text-align: left;
 }
 
+.sti-audit-panel__row--missing { border-left-color: #c0392b; }
+.sti-audit-panel__row--identical { border-left-color: #b8860b; }
+.sti-audit-panel__row--complete { border-left-color: #cfe6da; }
+
 .sti-audit-panel__row:hover {
   background: #f3f5f8;
 }
 
+/* The SELECTED row (DECISIONS.md #63). It is not "one of the rows, slightly tinted" —
+   it is the row the page is scrolled to, the highlight is drawn around, the inspector
+   is open on, and the keyboard is acting on, so it gets a genuinely different
+   treatment rather than a shade: it lifts off the list as a white card with a real
+   shadow and a solid brand-blue leading edge, its name goes semibold and full-contrast,
+   and only it carries the ▸ caret. Everything else in the list stays flat, which is
+   what makes the lift readable at a glance instead of merely different on inspection.
+   The rail colour is deliberately overridden here: on the selected row "this is where
+   I am" outranks "what status is it", which the detail line above and the language
+   codes on the row itself both still state. */
 .sti-audit-panel__row--active {
-  background: #eef3fd;
+  background: #ffffff;
+  border-left-color: #1a56db;
+  box-shadow: 0 1px 4px rgba(22, 50, 92, 0.16);
+  position: relative;
+  z-index: 1;
 }
 
-.sti-audit-panel__row-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.sti-audit-panel__row--active .sti-audit-panel__row-name {
+  font-weight: 600;
+  color: #16325c;
+}
+
+.sti-audit-panel__row-caret {
+  width: 7px;
   flex: none;
+  font-size: 9px;
+  line-height: 1;
+  color: #1a56db;
 }
 
 .sti-audit-panel__row-name {
@@ -317,4 +491,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+}
+
+/* The affected language codes, right-aligned — turns "this row is missing something"
+   into "this row is missing es, fr" without a second line or a hover. */
+.sti-audit-panel__row-meta {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  flex: none;
+  opacity: 0.85;
 }

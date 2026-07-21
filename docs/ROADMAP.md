@@ -30,7 +30,7 @@ marked "done" before 2026-07-21 is off by default without checking.
 | 7 | Standard labels without Translation Workbench | ✅ done | — |
 | 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done (advanced types opt-in), Lens pending | — |
 | 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing; advanced-type badges opt-in); missing/identical-to-source chip signals shipped 2026-07-21 (DECISIONS.md #58) | rest of QA Mode refinement (longer-term Screen Flows) pending |
-| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); **Duplicated-value detection shipped 2026-07-21 (DECISIONS.md #64)**; rest of QA Report v2 (Broken/Terminology) pending — needs real bad-data examples first | — |
+| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); **QA Report v2 RETIRED 2026-07-21** (DECISIONS.md #64, archived at tag `archive/translation-health-v2`) | — |
 | 11 | Language config UI + Quick Compare | 🟡 Quick Compare shipped 2026-07-21 (DECISIONS.md #59, closes PRODUCT.md MVP capability #2); language order/colors/icons/profiles still pending | — |
 | 12 | Advanced Metadata Inspector | ⬜ pending | — |
 | 13 | Smart Search | ⬜ pending | — |
@@ -318,23 +318,15 @@ opened via `chrome.tabs.create` rather than referenced directly in the manifest.
   per-language detail as Missing. Other consistency checks beyond missing/identical
   (Duplicated, Broken, Terminology) are still open — see QA Report v2 below.
 
-**Future refinement — QA / Localization Report v2 (2026-07-19 product review,
-⭐⭐⭐⭐⭐ potential):** extend the current per-language missing-count table with:
-- ✅ **Duplicated** detection — **shipped 2026-07-21 (`DECISIONS.md #64`)**: the same
-  translated value used by two or more different elements in the same language, a common
-  copy-paste mistake. Pure `computeDuplicateClusters` (`shared/duplicate-detection.ts`,
-  15 unit tests), surfaced as a "Duplicated" count column + per-language cluster detail in
-  the Health page. Base language excluded, empty excluded, Simple-Mode scoped, no new
-  toggle. The per-page Translation-Audit *Duplicated filter* (PHASE 18) stays deferred —
-  this detection is what makes the real-org cluster review it was waiting on possible.
-- **Broken** detection: values containing leftover merge-field syntax, unresolved
-  placeholders, or obviously truncated text — needs a concrete definition of "broken"
-  before implementation; don't guess at a heuristic without real bad-data examples
-  from an org.
-- **Broken references** (2026-07-20 roadmap review, backlog idea #24): flag translations pointing at metadata that no longer exists in the org — stale entries surviving a rename/delete, detectable by cross-referencing the health computation against the latest `listMetadata` results already fetched on each refresh, no new API calls.
-- **Terminology consistency checker** (2026-07-20 roadmap review, backlog idea #14 "AI Consistency Checker" — despite the name, this doesn't require an actual model): flag when the same source term (e.g. "Account", "Save") is translated inconsistently across different entries in the same language (e.g. "Cuenta" in one place, "Cliente" in another) — a clustering/grouping pass over the existing reverse index, not a new data source. Needs a concrete similarity/grouping definition confirmed against real inconsistency examples before implementation, same "don't guess at a heuristic" discipline as the Broken-detection bullet above.
-- **Export** (CSV/JSON) of the report — same underlying need as PHASE 14's export item,
-  should share one implementation.
+**QA / Localization Report v2 — RETIRED 2026-07-21 (`DECISIONS.md #64`).** The planned
+extensions (Duplicated / Broken / Broken-references / Terminology-consistency detection,
+report export) are no longer active roadmap: Translation Audit (PHASE 18) became the
+product's working QA surface and serves the same user need in-context, and the epic had
+become a source of orchestration complexity out of proportion to its value. A completed
+Duplicated-detection implementation (pure module + 209-line test suite + a preview
+harness) is preserved at git tag `archive/translation-health-v2` — if any of this is
+revived, the likely shape is an **Audit filter** (see PHASE 18's deferred "Duplicated
+filter"), reusing that module, not a Health-page column.
 - ✅ **Architecture guidance followed**: "identical to source language" above and
   PHASE 9's chip flagging are driven by the exact same `computeTranslationHealth()`
   computation in `background/index.ts` (`identicalToSourceLanguages`), not two
@@ -796,6 +788,117 @@ root-caused rather than patched:
   filter/expanded state, not a stable cross-session preference.
 
 Full write-up, including the exact root-cause reasoning for each: `DECISIONS.md #61`.
+
+### PHASE 18 additions — production polish round shipped (`DECISIONS.md #62`, 2026-07-21)
+Second real-org feedback round, focused on making the feature feel inevitable rather
+than merely correct. Full reasoning per item in `DECISIONS.md #62`; the behaviour that
+now holds:
+
+- **Modal lifecycle rules (final).** The inspector stays open through EVERY interaction
+  inside it — clicking metadata text, the type badge, Copy buttons, another language's
+  edit pencil, Save, Cancel, editing and saving a value. That is enforced in ONE place
+  (a root-level `onMouseDown` in `Tooltip.tsx` that swallows the focus-stealing default
+  action while an edit is open), not per element. It closes only on: a click on page
+  content outside it (one click, even mid-edit), Escape, or a state transition —
+  navigate to another target, change filter, type in the search box, toggle scope,
+  collapse the panel, turn Translate All off. All transitions funnel through
+  `invalidateAuditContext()` in `content/index.tsx`; nothing else may close it.
+- **Escape ladder:** cancel the edit → close the inspector → clear the search →
+  collapse the panel. One level per press.
+- **Internal list scrolling.** The panel's own list keeps the active row visible
+  (`scrollRowIntoList` in `AuditPanel.tsx`) on Next/Prev, row selection, filtering and
+  searching — scrolling ONLY its own container (never `scrollIntoView`, which would
+  drag the Salesforce page along with it and fight guided navigation's own corrected
+  scroll), smoothly, and only when the row isn't already comfortably visible.
+- **Integrated search.** One box above the filter tabs, matching API name, displayed
+  name, type label and every translated value. It is a second axis ON TOP of the
+  filters (search + Missing = missing entries matching the search), and tab counts
+  reflect the searched set so switching tabs mid-search isn't blind.
+- **Status visual language.** Continuous colour rails on rows (bands of same-status
+  rows are scannable in a way dots never were), the same rail on the current-target
+  card, status colour on the ACTIVE tab only, per-row language-code suffixes
+  (`ES FR`), and an active row marked by weight + tint + inset border. No filled
+  status backgrounds, no permanently-coloured tab row — deliberately not a dashboard.
+- **Translate All ↔ inspection: no new mechanism.** Navigating to ANY entry now opens
+  the same inspector tooltip; status/editability only decide whether it opens
+  pre-seeded on the problem language or read-only. The previous behaviour (inspector
+  for editable problem entries, nothing at all for `complete`/non-editable ones) was
+  the actual source of the "I have to exit Translate All and turn on Dynamic Hover"
+  friction. No Inspect button, no new shortcut, no second inspection system.
+
+**Known limitation — sticky/pinned headers (carried, now bounded).** The
+verify-and-correct pass from `#61` runs TWICE (a correction inside a nested scroll
+container can itself move the target under chrome that wasn't obstructing when the
+first measurement was taken; Lightning's highlights panel changes height as the page
+scrolls). Deliberately no third pass — past two this is chasing an animation, not
+converging. If a real org still lands a target under pinned chrome after two passes,
+the root cause is that Lightning's scroll-linked layout is still settling when we
+measure, and the correct fix is a `scrollend`/obstruction-`MutationObserver`-driven
+wait rather than more retries or a hardcoded Salesforce selector. Revisit here, in this
+phase, only with a concrete reproduction from a real page.
+
+**Still open in this phase:** the Duplicated filter (designed in full above, needs a
+real-org look at actual duplicate clusters first); keyboard shortcuts for Next/Prev
+(PHASE 17 infrastructure, natural fit, still not built); extending guided navigation to
+Translation Health's org-wide list.
+
+
+### PHASE 18 additions — regression round + interaction model (`DECISIONS.md #63`, 2026-07-21)
+Triggered by a reported regression ("the Dynamic Hover modal used to survive clicks
+inside it"). The cause was NOT in the click logic: `ensureShadowRoot()` cached on
+`host.shadowRoot`, which is always `null` for a CLOSED root, so each mount built its own
+`#sti-root` host and the `e.target === shadowHost` ownership check (`#54`) failed for
+whichever surface's host wasn't created last. Full write-up in `DECISIONS.md #63`.
+
+What now holds:
+
+- **One shadow host, verified.** Both React roots genuinely share one closed root, as
+  the architecture always claimed.
+- **Interaction priority model** in `content/interaction.ts`, documented in
+  `ARCHITECTURE.md` and unit-tested — including a regression test that pins BOTH
+  surfaces to the same outside-click rule, which is what the `#62` regression escaped.
+- **Two-stage dismissal restored** (`#55`): first outside click / Escape cancels the
+  edit, the second closes. Escape ladders one level per press: cancel edit → close
+  inspector → clear search → collapse panel.
+- **Both surfaces cancel through ONE mechanism** (`cancelTrigger`). The inspector's old
+  path relied on a `render(null)` "force remount" that React 18 batches away, so Escape
+  and outside-click silently did nothing there.
+- **The modal follows its subject** while scrolling (element-anchored via `anchorEl`),
+  freezing while an edit is open or the pointer is over it, and hiding — never
+  unmounting — while the subject is off screen. The hover tooltip deliberately does not
+  follow: it has no persistent subject.
+- **The selection highlight is viewport-bounded**: it tracks while its element is on
+  screen and stops being drawn when it isn't, rather than following it off the edge. Same
+  `isElementInViewport` predicate as the modal, so the two can never disagree.
+- **Metadata-type chips** (`typeLabel()` strings — the same names the row badges show),
+  multi-select, only for types present on the page, ANDed with search and the status
+  tabs. Field and Custom Field are separate categories because the badges already split
+  them that way; selecting both is the union.
+- **Keyboard navigation**: Up/Down and Left/Right for prev/next, Enter to activate, all
+  routed through the same `handleAuditNavigate` the buttons use. Silent while editing
+  and while focus is in a real Salesforce field; inside the panel's search box Up/Down
+  navigate but Left/Right stay with the caret.
+- **The selected row lifts off the list** (white card, shadow, blue leading edge, ▸
+  caret) instead of being a slightly different shade.
+
+**A real-browser dev harness now exists** (`dev-harness/`, `npm run harness`) — see
+`ARCHITECTURE.md` for what it is, what it found, and the limits that matter (backgrounded
+tab: no scroll events, no rAF, no smooth scrolling).
+
+### PHASE 17 additions — navigation shortcut configuration (designed, deliberately NOT built)
+Requested alongside `#63`'s keyboard navigation, for compact/60% keyboards where arrows
+need a modifier. Real concern, deliberately deferred: building a five-binding recorder UI
+now means designing conflict rules against three existing shortcuts before a single
+actual collision has been reported — configuration ahead of evidence, which PHASE 17
+already had to simplify back down once (`#57`). Arrows and Enter are also the one set no
+user has to learn.
+
+Pick this up when a real collision is reported. It is a small addition: `ShortcutToggleRow`
+(`#57`) already provides a conflict-checked recorder, `shared/hotkeys.ts` already provides
+the comparison logic, and `interaction.ts`'s `resolveNavKey` is the single place that maps
+a key to a navigation action — so making it read configured keys instead of hardcoded ones
+touches one function, not the interaction model.
+
 
 ### PHASE 19 — Hover History & Favorites
 **Alta priority.** Backlog ideas #7 and #8, grouped as a pair of small local-list

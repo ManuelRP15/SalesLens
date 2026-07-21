@@ -157,6 +157,16 @@ Wants to own vision, product/UX calls, prioritization, and real-world acceptance
 and to delegate execution. Escalations should be crisp and decision-shaped (see the
 `DECISION REQUIRED` format), answerable quickly.
 
+### C4 — The local project is the source of truth; orchestration must stay simpler than the product. `Explicit` (2026-07-21 reset instruction)
+Implementation, testing, and delivery happen in the owner's active local checkout; GitHub
+is version control/backup/collaboration *around* it. Progress is measured ONLY by what
+the real local product can do — "never confuse activity with progress"; a pile of
+commits/PRs/reports with an unchanged local product is a failure, not throughput. Also
+explicitly anti-sunk-cost: retire work that no longer fits the product rather than
+force-complete it because effort was already spent.
+- **Evidence:** the 2026-07-21 state-reset instruction (verbatim and extensive),
+  `DECISIONS.md #64`, factory V1.2 (`METHODOLOGY.md §0`).
+
 ---
 
 ## Weakly inferred (hold loosely — ask, don't assume)

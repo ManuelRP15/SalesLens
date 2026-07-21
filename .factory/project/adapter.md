@@ -16,6 +16,15 @@
 - **Stack:** TypeScript + React 18 + Vite 5 + `@crxjs/vite-plugin` v2 (beta), Manifest V3.
   No external UI framework. Vitest for unit tests. `fflate` + `fast-xml-parser`.
 
+## The product location (V1.2 — `docs/DECISIONS.md #64`)
+
+The product IS the working tree at
+`C:\Users\manue\Documents\Proyectos\salesforce_translation_inspector` — the owner's one
+active checkout, where they build, load `dist/` into the browser, and test. Implement,
+verify, and deliver THERE, on a branch checked out there. Side worktrees (the
+`sti_health_v2` pattern) are retired; GitHub is the backup/collab layer around this tree,
+never the definition of done.
+
 ## Commands (the factory's machine-verifiable gate — G2/G4)
 
 | Purpose | Command | Gate |

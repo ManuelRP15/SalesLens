@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { isElementInViewport } from "./dom-utils";
 import { BASE_LANGUAGE, isEditableEntry, type LabelEntry, type SaveTranslationResponse } from "../shared/types";
 import { TYPE_COLORS, displayApiName, langAccent, setupPath, typeLabel } from "./tooltip-constants";
 
@@ -57,6 +58,18 @@ interface TooltipProps {
    * if nothing is currently being edited.
    */
   cancelTrigger?: number;
+  /**
+   * The page element this tooltip is ABOUT, when it was summoned by an explicit
+   * Translate All selection rather than by a hover (DECISIONS.md #63). Its presence is
+   * what turns the tooltip from a point-anchored popover into an element-anchored one:
+   * it re-derives its position from this element's live rect as the page scrolls, and
+   * hides itself while the element is off screen.
+   *
+   * Deliberately absent on the hover path. A hover tooltip describes wherever the
+   * cursor happened to be; it has no persistent subject to stay attached to, and
+   * making it chase an element would change a behaviour that already works.
+   */
+  anchorEl?: Element;
 }
 
 /** Copies to the clipboard, falling back to a hidden textarea if the Clipboard API is unavailable/blocked. */
@@ -146,9 +159,15 @@ interface TranslationEditorProps {
  * The inline editor a language row swaps to on "Edit". Save fires on the Save
  * button, Enter (without Shift), Ctrl/Cmd+S, or losing focus with a changed value —
  * whichever the user reaches for first. Escape and losing focus with an UNCHANGED
- * value both cancel without a network call. The Save/Cancel buttons use onMouseDown
- * preventDefault so clicking them doesn't blur the textarea first and race the
- * blur-triggered commit against the button's own click handler.
+ * value both cancel without a network call.
+ *
+ * Note on blur: nothing INSIDE the tooltip can blur this textarea any more — the
+ * tooltip root swallows the focus-stealing default action of every mousedown that
+ * isn't aimed at a real form field while an edit is active (see `Tooltip` below,
+ * DECISIONS.md #62). So `onBlur` now only ever fires for focus genuinely leaving the
+ * tooltip (clicking the page, Tab, the window losing focus), which is exactly the
+ * "the user moved on, commit what they typed" case it was written for. The Save/
+ * Cancel buttons therefore no longer need their own per-button onMouseDown guards.
  */
 function TranslationEditor({ initialValue, status, errorMessage, onSave, onCancel, savingLabel }: TranslationEditorProps) {
   const [value, setValue] = useState(initialValue);
@@ -204,22 +223,10 @@ function TranslationEditor({ initialValue, status, errorMessage, onSave, onCance
         }}
       />
       <div className="sti-edit-actions">
-        <button
-          type="button"
-          className="sti-edit-save"
-          disabled={saving}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={commit}
-        >
+        <button type="button" className="sti-edit-save" disabled={saving} onClick={commit}>
           {saving ? savingLabel : "Save"}
         </button>
-        <button
-          type="button"
-          className="sti-edit-cancel"
-          disabled={saving}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={onCancel}
-        >
+        <button type="button" className="sti-edit-cancel" disabled={saving} onClick={onCancel}>
           Cancel
         </button>
         {status === "error" && <span className="sti-edit-error">{errorMessage}</span>}
@@ -467,9 +474,53 @@ function CandidateBlock({
   );
 }
 
-export function Tooltip({ text, x, y, candidates, activeLanguages, flagIdentical, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage, editTrigger, cancelTrigger }: TooltipProps) {
+/** Real form fields inside the tooltip — the only descendants allowed to take focus away from an open editor on mousedown. See `Tooltip`'s `handleMouseDown`. */
+const FOCUSABLE_FIELD_SELECTOR = "textarea, input, select, [contenteditable='true']";
+
+export function Tooltip({ text, x, y, candidates, activeLanguages, flagIdentical, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage, editTrigger, cancelTrigger, anchorEl }: TooltipProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ left: x + 12, top: y + 16 });
+  /** The point the tooltip is currently laid out from. Starts at the summoning (x, y) and, for an anchored tooltip, is re-derived from the anchor's live rect on scroll. */
+  const [origin, setOrigin] = useState({ x, y });
+  /** Anchored tooltips only: false while the anchor is scrolled out of view. Hidden, NOT unmounted — an unmount would throw away a half-typed edit and the conflict banner along with it. */
+  const [anchorVisible, setAnchorVisible] = useState(true);
+  /** True while the pointer is over the tooltip itself — see the follow effect for why that freezes it. */
+  const pointerOverRef = useRef(false);
+  // Mirrors the child's editing state locally so the root can own focus while an edit
+  // is open (see handleMouseDown) — the host page still gets the same notification it
+  // always did, through this same call.
+  const [editingActive, setEditingActive] = useState(Boolean(autoEditLanguage));
+  const handleEditingActiveChange = useCallback(
+    (active: boolean) => {
+      setEditingActive(active);
+      onEditingActiveChange?.(active);
+    },
+    [onEditingActiveChange]
+  );
+
+  /**
+   * THE modal-ownership rule, in one place (DECISIONS.md #62): while an edit is open,
+   * a mousedown anywhere inside the tooltip that isn't aimed at a real form field has
+   * its default action swallowed, so focus never leaves the textarea. Everything the
+   * user can click in here — metadata text, the type badge, Copy buttons, another
+   * language's Edit pencil, Save, Cancel — still receives its click normally; it just
+   * can't silently tear the editor down as a side effect of a blur it never asked for.
+   *
+   * This replaces per-element `onMouseDown={e => e.preventDefault()}` guards, which
+   * only ever protected the handful of controls someone remembered to annotate: the
+   * bug was structural ("any inside click ends the edit"), so the fix is structural.
+   * It is deliberately scoped to WHILE EDITING — in view mode the tooltip stays a
+   * normal surface where a translation value can be selected with the mouse.
+   */
+  const handleMouseDown = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      if (!editingActive) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(FOCUSABLE_FIELD_SELECTOR)) return;
+      e.preventDefault();
+    },
+    [editingActive]
+  );
 
   // Keep the tooltip fully on screen: measure the rendered box and clamp
   // horizontally; if it would overflow the bottom, flip it above the cursor.
@@ -481,22 +532,84 @@ export function Tooltip({ text, x, y, candidates, activeLanguages, flagIdentical
     if (!node) return;
     const rect = node.getBoundingClientRect();
     const margin = 8;
-    let left = x + 12;
-    let top = y + 16;
+    let left = origin.x + 12;
+    let top = origin.y + 16;
     if (left + rect.width > window.innerWidth - margin) {
       left = Math.max(margin, window.innerWidth - rect.width - margin);
     }
     if (top + rect.height > window.innerHeight - margin) {
-      top = Math.max(margin, y - rect.height - 12);
+      top = Math.max(margin, origin.y - rect.height - 12);
     }
     setPos((prev) => (prev.left === left && prev.top === top ? prev : { left, top }));
     onRectChange?.(rect);
   });
 
+  // The summoning point can change without a remount (guided navigation re-anchors an
+  // already-open inspector), so keep `origin` in step with the props it came from.
+  useEffect(() => setOrigin({ x, y }), [x, y]);
+
+  /**
+   * Element-anchored follow (DECISIONS.md #63) — only for a tooltip that HAS a subject
+   * (`anchorEl`, i.e. an explicit Translate All selection). It re-derives its origin
+   * from the anchor's live rect as the page scrolls, so the modal and the highlight
+   * rectangle stay on the same field instead of drifting apart, and hides while the
+   * anchor is off screen.
+   *
+   * The two freeze conditions are the whole design, not edge cases:
+   *  - **Editing.** A textarea that slides while you type is hostile, and the active
+   *    editor outranks everything (the priority model in `interaction.ts`). A frozen
+   *    modal during an edit is the lesser evil by a wide margin.
+   *  - **The pointer is over the tooltip.** Scrolling with the wheel while hovering the
+   *    modal would otherwise pull it out from under the cursor mid-gesture — the exact
+   *    "never unexpectedly move away from the user's cursor" failure. It re-syncs the
+   *    moment the pointer leaves.
+   *
+   * Reuses the component's OWN existing layout effect for the actual placement (clamp,
+   * flip-above-when-it-would-overflow): this only moves the origin point, so there is
+   * still exactly one positioning implementation.
+   */
+  useEffect(() => {
+    if (!anchorEl) return;
+    const sync = () => {
+      if (editingActive || pointerOverRef.current) return;
+      const visible = isElementInViewport(anchorEl);
+      setAnchorVisible(visible);
+      if (!visible) return;
+      const rect = anchorEl.getBoundingClientRect();
+      const next = { x: rect.left, y: rect.bottom - 4 };
+      setOrigin((prev) => (prev.x === next.x && prev.y === next.y ? prev : next));
+    };
+    // Synchronous per scroll event, exactly like `positionHighlight` in
+    // content/index.tsx — the highlight rectangle and this modal are two views of the
+    // same selection, so they run off the same signal at the same cadence rather than
+    // one of them being rAF-coalesced and drifting a frame behind the other. React's
+    // own batching already collapses repeated setState from a burst of scroll events.
+    window.addEventListener("scroll", sync, { passive: true, capture: true });
+    window.addEventListener("resize", sync, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", sync, true);
+      window.removeEventListener("resize", sync);
+    };
+  }, [anchorEl, editingActive]);
+
   useEffect(() => () => onRectChange?.(null), [onRectChange]);
 
   return (
-    <div ref={rootRef} className="sti-tooltip" style={{ left: pos.left, top: pos.top }} role="tooltip">
+    <div
+      ref={rootRef}
+      className="sti-tooltip"
+      style={{
+        left: pos.left,
+        top: pos.top,
+        // Hidden, not unmounted — see `anchorVisible`. `visibility` (not `display`)
+        // so the box keeps its measured size and comes back in place.
+        visibility: anchorVisible ? undefined : "hidden",
+      }}
+      role="tooltip"
+      onMouseDown={handleMouseDown}
+      onMouseEnter={() => { pointerOverRef.current = true; }}
+      onMouseLeave={() => { pointerOverRef.current = false; }}
+    >
       <div className="sti-tooltip__title">
         <span>{text}</span>
         <CopyIconButton value={text} title="Copy displayed text" />
@@ -509,7 +622,7 @@ export function Tooltip({ text, x, y, candidates, activeLanguages, flagIdentical
           activeLanguages={activeLanguages}
           flagIdentical={flagIdentical}
           onSaveTranslation={onSaveTranslation}
-          onEditingActiveChange={onEditingActiveChange}
+          onEditingActiveChange={handleEditingActiveChange}
           autoEditLanguage={autoEditLanguage}
           editTrigger={editTrigger}
           cancelTrigger={cancelTrigger}

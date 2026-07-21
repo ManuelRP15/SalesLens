@@ -325,23 +325,3 @@ export interface TranslationHealthEntry {
    */
   identicalToSourceLanguages: string[];
 }
-
-/**
- * One duplicate-value cluster within a single language: a translated value that two or
- * more DISTINCT elements share (`DECISIONS.md #64`, ROADMAP.md PHASE 10 QA Report v2).
- * A copy-paste QA smell — someone translated one field and pasted the same value onto
- * another. Framed as a soft, POSSIBLE signal, never an error: two fields genuinely
- * sharing a translation is legitimate, so this reads like "Possibly untranslated", not a
- * hard failure. Base language is excluded (two English "Name" fields is normal), empty
- * values are excluded, and Simple Mode scopes it like every other health signal.
- * Computed from data already in memory — no new API calls.
- */
-export interface DuplicateCluster {
-  /** The shared value, whitespace-normalized (the grouping key doubles as the display form). */
-  value: string;
-  /** The 2+ distinct elements that carry this same value in the language. */
-  members: Array<{ apiName: string; type: LabelType }>;
-}
-
-/** Per-language duplicate report: language code → its clusters. A language with no duplicates has no key at all (so `Object.keys` is the set of languages that have any). */
-export type DuplicateClusterReport = Record<string, DuplicateCluster[]>;

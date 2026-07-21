@@ -17,6 +17,15 @@ adapter's table.
 
 ## The loop
 
+### 0. Reconcile CURRENT PRODUCT STATE (`METHODOLOGY.md §0` — V1.2, mandatory)
+**The local project directory is the product; GitHub is backup around it.** Before
+framing, establish with commands (not assumptions): the active local checkout and its
+branch; uncommitted working-tree changes (they are PRODUCT STATE — understand them, never
+clobber or build around them); whether the tree passes G2; `CURRENT_STATE.md`'s picture;
+and the next intended work in one sentence. Work directly in that checkout on a branch —
+no side worktrees unless genuinely parallel work demands one, and then integration back
+into the local checkout is part of the task, not a follow-up.
+
 ### 1. Frame & classify (gate G0)
 State the goal in one sentence. Assign a risk tier **T0–T3** with the routing signal that
 set it (`METHODOLOGY.md §1`). If requirements are ambiguous or a product fork exists, **stop
@@ -60,7 +69,8 @@ is blocked on G-PO:
   real `<Health/>`), drive it, read it back (`read_page`/`get_page_text`), screenshot. "The
   code exists / tests pass" is NOT a demonstration.
 - **Is it in a runnable artifact the user can load?** A change stranded on an unmerged/unbuilt
-  branch is not delivered — say exactly where the user runs it (branch, `dist/`, worktree).
+  branch is not delivered — it must be present in the **active local checkout** (the branch
+  checked out there + its `dist/`), never only in a side worktree or a GitHub-only branch.
 
 Report against the **verification tier ladder** (code-exists < machine < harness < real-org <
 product-outcome-observed) — state which tier each change reached; never blur them.
