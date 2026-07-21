@@ -28,7 +28,7 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 
 | File | Responsibility |
 |---|---|
-| `types.ts` | Every shared type: `LabelEntry`, `LabelType`, `Settings`, all `chrome.runtime` message request/response shapes, `isEditableLabelType()`. |
+| `types.ts` | Every shared type: `LabelEntry`, `LabelType`, `Settings`, all `chrome.runtime` message request/response shapes, `isEditableLabelType()`/`isEditableEntry()` (field-level editability), `isInSimpleScope()` (Simple Mode, `#56`). |
 | `normalize.ts` | Text normalization (`normalizeText`/`normalizeTextLoose`) used to build and query the reverse index. |
 | `index-builder.ts` | `buildReverseIndex()` + `resolveText()` — the disambiguation funnel. The single most important algorithm in the project; always returns 0 or 1 candidates, never a list (`DECISIONS.md #28`). |
 | `index-builder.test.ts` | Unit tests for the funnel above — no Chrome/Salesforce dependency. |
@@ -141,18 +141,22 @@ real debugging session at least once (see the linked `DECISIONS.md` entry).
    Metadata API only ever returns the *translated* value; the base value needs its own
    tightly-scoped Tooling/REST query, limited to exactly the API names already
    discovered via `listMetadata` (`#9`).
-8. **Editing has two write mechanisms behind one gate (`isEditableLabelType()`,
-   `types.ts`).** Custom Label translations are standalone Tooling API records
-   (PATCH/POST-able individually, `salesforce-api.ts`). Every other editable type's
-   translation lives inside a `CustomObjectTranslation`/`Translations`/
-   `GlobalValueSetTranslation` XML file, written via a Metadata API `deploy()`
-   (`metadata-write.ts`, PHASE 6b, `#41`, `#53`). **`ObjectLabel`/`RelatedList` stay
-   non-editable** — their target (`<caseValues>`) can hold multiple grammatical-case
-   entries for gendered languages, not yet safely patchable — and
+8. **Editing has two write mechanisms behind one gate — `isEditableEntry()`,
+   `types.ts`, not just `isEditableLabelType()`.** Custom Label translations are
+   standalone Tooling API records (PATCH/POST-able individually, `salesforce-api.ts`).
+   Every other editable type's translation lives inside a `CustomObjectTranslation`/
+   `Translations`/`GlobalValueSetTranslation` XML file, written via a Metadata API
+   `deploy()` (`metadata-write.ts`, PHASE 6b, `#41`, `#53`). **`ObjectLabel`/
+   `RelatedList` stay non-editable** — their target (`<caseValues>`) can hold multiple
+   grammatical-case entries for gendered languages, not yet safely patchable — and
    **`StandardButton`/`StandardTab` are PERMANENTLY non-editable**, not a pipeline
    gap: they're Salesforce's own platform-controlled translations, there is no
-   admin-authored value to write back to. Don't add a type to `EDITABLE_LABEL_TYPES`
-   without a real write path backing it.
+   admin-authored value to write back to. **`FieldLabel`/`PicklistValue` are editable
+   for CUSTOM (`__c`) instances only** (`#56`) — real Salesforce rejections confirmed
+   standard fields/picklists need a different, unbuilt mechanism
+   (`StandardValueSetTranslation` for picklists); this is why `isEditableEntry()`
+   takes the full `LabelEntry`, not just its `type`. Don't add a type/case to the
+   editable set without a real write path backing it.
 9. **Every translation write does optimistic concurrency control** — re-read the live
    org value immediately before writing, abort (don't overwrite) on mismatch (`#42`).
    Non-negotiable for any future write path too, not just this one.

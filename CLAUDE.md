@@ -48,14 +48,26 @@ product, not just a feature:
    instead of silently vanishing; `background/index.ts`'s `saveTranslation()` is the
    one place that catches it and turns it into a user-facing message.
 6. Zero false positives beats coverage. A wrong guess is worse than no answer.
-7. Editing is scoped to `isEditableLabelType()`'s set (`types.ts`) — 9 of 13
-   `LabelType`s (see `DECISIONS.md #41`, `#53`). `ObjectLabel`/`RelatedList` are
-   deferred (their target, `<caseValues>`, needs safe multi-grammatical-case handling
-   first); `StandardButton`/`StandardTab` are **permanently** non-editable — they're
+7. Editing is scoped to `isEditableEntry()`'s set (`types.ts`) — type-level via
+   `isEditableLabelType()` (9 of 13 `LabelType`s, `DECISIONS.md #41`, `#53`) AND, for
+   `FieldLabel`/`PicklistValue` specifically, FIELD-level (custom `__c` only —
+   standard fields/picklists need a different, unbuilt write mechanism, real Salesforce
+   rejections confirmed this, `DECISIONS.md #56`). Always check entries with
+   `isEditableEntry(entry)`, never just `isEditableLabelType(entry.type)` — the type
+   alone isn't enough for those two types. `ObjectLabel`/`RelatedList` are deferred
+   (their target, `<caseValues>`, needs safe multi-grammatical-case handling first);
+   `StandardButton`/`StandardTab` are **permanently** non-editable — they're
    Salesforce's own platform-controlled translations, not admin-authored content, so
-   there's nothing to write back to. Don't add an edit affordance for any type outside
-   this set without a real write path backing it.
-8. Update `docs/DECISIONS.md` and `docs/CURRENT_STATE.md` **in the same turn** a
+   there's nothing to write back to. Don't add an edit affordance for any type/case
+   outside this set without a real write path backing it.
+8. **Simple mode (`Settings.simpleMode`, default true) is the product's default
+   surface** — only Object/Field/Picklist/Custom-Label translations show via hover,
+   Translation Mode, and Translation Health unless the user opts into Advanced. Every
+   other type (buttons, quick actions, tabs, apps, record types, layout sections)
+   stays fully built and correct — filtered at ONE choke point
+   (`background/index.ts`'s `applySimpleScope`/`isInSimpleScope`), never by skipping
+   the underlying fetch/resolve logic. See `PRODUCT.md`/`DECISIONS.md #56`.
+9. Update `docs/DECISIONS.md` and `docs/CURRENT_STATE.md` **in the same turn** a
    decision is made or a session ends — not "later," not "if there's time."
 
 ## Never do this
