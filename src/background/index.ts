@@ -3,6 +3,7 @@ import { MOCK_LABEL_ENTRIES } from "../shared/mock-data";
 import { fetchAllTranslations, saveCustomLabelTranslation, toApiHost } from "../shared/salesforce-api";
 import { fetchMetadataTranslationEntries } from "../shared/metadata-translations";
 import { saveMetadataTranslation } from "../shared/metadata-write";
+import { computeDuplicateClusters } from "../shared/duplicate-detection";
 import { BASE_LANGUAGE, isEditableEntry, isInSimpleScope } from "../shared/types";
 import type {
   ResolveTextRequest,
@@ -145,10 +146,12 @@ async function setIndexFromRealData(entries: LabelEntry[]): Promise<void> {
 
   const settings = await getSettings();
   const translationHealth = computeTranslationHealth(entries, settings.activeLanguages, settings.simpleMode);
+  const duplicateClusters = computeDuplicateClusters(entries, settings.activeLanguages, settings.simpleMode);
   await chrome.storage.local.set({
     settings: { ...settings, lastIndexRefresh: Date.now() } satisfies Settings,
     cachedEntries: entries,
     translationHealth,
+    duplicateClusters,
   });
 }
 

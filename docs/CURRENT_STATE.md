@@ -7,6 +7,18 @@
 
 ## Active work
 
+**`feature/translation-health-v2` (this branch) — Translation Health v2: Duplicated-value
+detection (`#64`), the AI Software Factory's first end-to-end epic.** Shipped: pure
+`computeDuplicateClusters` (`shared/duplicate-detection.ts`, 15 unit tests) + a "Duplicated"
+column and cluster detail in the Health page. Machine-verified (tsc/85 tests/build green);
+real-org rendering + signal-usefulness UNVERIFIED (manual checklist in the PR). Branched off
+the factory branch, so its docs baseline predates the in-flight `#62`/`#63`; the DECISIONS
+numbering (`#64`, skipping `#62`/`#63`) and this section will need trivial reconciliation
+when `feature/translation-audit` merges. Immediate next step: real-org check of the Health
+page; then the deferred audit-panel Duplicated filter becomes decidable from real clusters.
+
+The prior in-flight line, still true on its own branch:
+
 `feature/translation-audit` (off `main`, which now has PHASE 6b + rounds 1-4/`#53`-`#58`
 + Quick Compare/`#59` all merged) — Translation Audit v1 (`#60`) shipped, then
 **real-org tested by the user and its first bug round fixed same day** (`#61`):

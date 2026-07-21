@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Settings, TranslationHealthEntry } from "../shared/types";
+import type { DuplicateCluster, DuplicateClusterReport, LabelType, Settings, TranslationHealthEntry } from "../shared/types";
 import { TYPE_COLORS, TYPE_LABELS } from "../content/tooltip-constants";
 
 const LANG_NAMES: Record<string, string> = {
@@ -9,48 +9,79 @@ const LANG_NAMES: Record<string, string> = {
 
 interface LoadedState {
   entries: TranslationHealthEntry[];
+  duplicates: DuplicateClusterReport;
   languages: string[];
   flagIdentical: boolean;
 }
 
 async function loadHealth(): Promise<LoadedState> {
-  const stored = await chrome.storage.local.get(["translationHealth", "settings"]);
+  const stored = await chrome.storage.local.get(["translationHealth", "duplicateClusters", "settings"]);
   const entries = (stored.translationHealth as TranslationHealthEntry[] | undefined) ?? [];
+  const duplicates = (stored.duplicateClusters as DuplicateClusterReport | undefined) ?? {};
   const settings = stored.settings as Settings | undefined;
   return {
     entries,
+    duplicates,
     languages: settings?.activeLanguages ?? [],
     flagIdentical: settings?.flagIdenticalTranslations ?? true,
   };
 }
 
-/** One labeled group of `apiName (type)` rows in an expanded language's detail panel — shared shape for "Missing" and "Possibly untranslated" so the two read as one system rather than differently-styled lists. */
+/** One `TYPE  apiName` row — the single shared shape for every element listed in the detail panel (Missing, Possibly untranslated, and each duplicate cluster's members), so all three read as one system. */
+function ElementRow({ apiName, type }: { apiName: string; type: LabelType }) {
+  const colors = TYPE_COLORS[type];
+  return (
+    <li style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          background: colors.bg,
+          color: colors.color,
+          borderRadius: 4,
+          padding: "1px 6px",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {TYPE_LABELS[type]}
+      </span>
+      <code style={{ fontSize: 12 }}>{apiName}</code>
+    </li>
+  );
+}
+
+/** A labeled group of element rows — used for "Missing" and "Possibly untranslated". */
 function renderEntryList(label: string, entries: TranslationHealthEntry[]) {
   return (
     <div>
       <div style={{ fontSize: 11, textTransform: "uppercase", color: "#706e6b", marginBottom: 4 }}>{label}</div>
       <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 4 }}>
-        {entries.map((e) => {
-          const colors = TYPE_COLORS[e.type];
-          return (
-            <li key={e.apiName + e.type} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  background: colors.bg,
-                  color: colors.color,
-                  borderRadius: 4,
-                  padding: "1px 6px",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {TYPE_LABELS[e.type]}
-              </span>
-              <code style={{ fontSize: 12 }}>{e.apiName}</code>
-            </li>
-          );
-        })}
+        {entries.map((e) => (
+          <ElementRow key={e.apiName + e.type} apiName={e.apiName} type={e.type} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The duplicate detail: each shared value, then the elements that repeat it. Same badge vocabulary as `renderEntryList` so duplicates read as one more health signal, not a separate feature. */
+function renderClusterList(label: string, clusters: DuplicateCluster[]) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, textTransform: "uppercase", color: "#706e6b", marginBottom: 4 }}>{label}</div>
+      <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 8 }}>
+        {clusters.map((c) => (
+          <li key={c.value} style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 13 }}>
+              “<span style={{ fontWeight: 600 }}>{c.value}</span>” — used by {c.members.length}
+            </span>
+            <ul style={{ margin: "0 0 0 12px", padding: 0, listStyle: "none", display: "grid", gap: 4 }}>
+              {c.members.map((m) => (
+                <ElementRow key={m.apiName + m.type} apiName={m.apiName} type={m.type} />
+              ))}
+            </ul>
+          </li>
+        ))}
       </ul>
     </div>
   );
@@ -68,7 +99,7 @@ export function Health() {
     return <div style={{ padding: 24 }}>Loading…</div>;
   }
 
-  const { entries, languages, flagIdentical } = state;
+  const { entries, duplicates, languages, flagIdentical } = state;
 
   if (entries.length === 0) {
     return (
@@ -80,6 +111,9 @@ export function Health() {
       </div>
     );
   }
+
+  // Language + Missing + [Possibly untranslated] + Duplicated + Coverage.
+  const detailColSpan = flagIdentical ? 5 : 4;
 
   return (
     <div style={{ padding: 24, maxWidth: 820, margin: "0 auto" }}>
@@ -109,6 +143,7 @@ export function Health() {
             <th style={{ padding: "8px 6px" }}>Language</th>
             <th style={{ padding: "8px 6px" }}>Missing</th>
             {flagIdentical && <th style={{ padding: "8px 6px" }}>Possibly untranslated</th>}
+            <th style={{ padding: "8px 6px" }}>Duplicated</th>
             <th style={{ padding: "8px 6px" }}>Coverage</th>
           </tr>
         </thead>
@@ -116,6 +151,7 @@ export function Health() {
           {languages.map((lang) => {
             const missing = entries.filter((e) => e.missingLanguages.includes(lang));
             const identical = entries.filter((e) => e.identicalToSourceLanguages.includes(lang));
+            const dupes = duplicates[lang] ?? [];
             const coverage = Math.round(((entries.length - missing.length) / entries.length) * 100);
             const isExpanded = expandedLang === lang;
             return (
@@ -136,6 +172,9 @@ export function Health() {
                       {identical.length}
                     </td>
                   )}
+                  <td style={{ padding: "8px 6px", color: dupes.length > 0 ? "#b8860b" : "#706e6b" }}>
+                    {dupes.length}
+                  </td>
                   <td style={{ padding: "8px 6px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div style={{ flex: 1, background: "#eef1f6", borderRadius: 4, height: 8, maxWidth: 160 }}>
@@ -154,21 +193,17 @@ export function Health() {
                 </tr>
                 {isExpanded && (
                   <tr key={`${lang}-details`}>
-                    <td colSpan={flagIdentical ? 4 : 3} style={{ padding: "4px 6px 14px 24px", background: "#f9fafb" }}>
-                      {missing.length === 0 && identical.length === 0 ? (
+                    <td colSpan={detailColSpan} style={{ padding: "4px 6px 14px 24px", background: "#f9fafb" }}>
+                      {missing.length === 0 && identical.length === 0 && dupes.length === 0 ? (
                         <span style={{ color: "#1a7f4e", fontSize: 13 }}>Everything translated ✓</span>
                       ) : (
-                        <>
+                        <div style={{ display: "grid", gap: 10 }}>
                           {missing.length > 0 && renderEntryList("Missing", missing)}
-                          {flagIdentical && identical.length > 0 && (
-                            <div style={{ marginTop: missing.length > 0 ? 10 : 0 }}>
-                              {renderEntryList(
-                                "Possibly untranslated — identical to the source language",
-                                identical
-                              )}
-                            </div>
-                          )}
-                        </>
+                          {flagIdentical && identical.length > 0 &&
+                            renderEntryList("Possibly untranslated — identical to the source language", identical)}
+                          {dupes.length > 0 &&
+                            renderClusterList("Duplicated — the same value used by multiple elements", dupes)}
+                        </div>
                       )}
                     </td>
                   </tr>
