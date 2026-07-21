@@ -12,6 +12,31 @@ import {
 /** Fired when the user clicks an editable chip — content/index.tsx opens the same editor the hover tooltip uses, anchored at (x, y). */
 export type TmEditRequestHandler = (entry: LabelEntry, language: string, x: number, y: number) => void;
 
+/** One overall status per on-page entry, in priority order — missing is strictly more actionable than identical, so an entry missing in one active language and identical in another still counts as "missing" for filtering purposes (ROADMAP.md PHASE 18, DECISIONS.md #60). */
+export type AuditStatus = "missing" | "identical" | "complete";
+
+/**
+ * One de-duplicated logical translation entry currently ON THE PAGE, for the
+ * Translate All audit panel (PHASE 18) — distinct from `BadgeTranslation` above,
+ * which is per-(element, language) for badge rendering. `element` is the FIRST
+ * DOM occurrence encountered during the scan (the same entry can legitimately
+ * render more than once on a page, e.g. a field shown on both a detail panel and a
+ * related list — only the first is ever the guided-navigation target, a deliberate
+ * simplification, see ROADMAP.md PHASE 18's "Known Salesforce limitations").
+ */
+export interface AuditEntry {
+  /** `apiName + type`, stable identity for de-duplication and for React list keys. */
+  key: string;
+  entry: LabelEntry;
+  element: Element;
+  missingLanguages: string[];
+  identicalLanguages: string[];
+  editable: boolean;
+  status: AuditStatus;
+}
+
+export type AuditUpdateHandler = (entries: AuditEntry[]) => void;
+
 // Short enough that opening a dropdown/menu annotates before the user closes it.
 const RESCAN_DEBOUNCE_MS = 250;
 // Elements that visually can't render appended children (or where doing so would be
@@ -33,6 +58,7 @@ let isRunning = false;
 let currentActiveLanguages: string[] = [];
 let currentStyle: TmStyle = DEFAULT_TM_STYLE;
 let currentOnEditRequest: TmEditRequestHandler | undefined;
+let currentOnAuditUpdate: AuditUpdateHandler | undefined;
 let mutationObserver: MutationObserver | undefined;
 let rescanTimer: number | undefined;
 let scanInFlight = false;
@@ -237,6 +263,11 @@ async function scan() {
       (t) => !SKIP_TAGS.has(t.element.tagName)
     );
     const matchedElements = new Set<Element>();
+    // Keyed by `apiName + type` — the audit panel (PHASE 18) needs ONE row per
+    // logical entry, not one per DOM occurrence (the same field can legitimately
+    // render twice on one page). First occurrence in scan order wins as the
+    // navigation target; see AuditEntry's own doc comment.
+    const auditByKey = new Map<string, AuditEntry>();
 
     if (targets.length > 0) {
       const response = await resolveTextsBulk(targets.map((t) => ({ text: t.text, hints: t.hints })));
@@ -245,11 +276,37 @@ async function scan() {
         response.results.forEach((result, i) => {
           if (result.candidates.length === 0) return;
           const entry = result.candidates[0];
-          // Skip the element entirely if NONE of the active languages have anything —
+          const element = targets[i].element;
+
+          // Audit data is computed for EVERY resolved entry, regardless of whether
+          // any active language has a value — unlike the badge-display gate below,
+          // an entry with ZERO coverage in the user's chosen languages is exactly
+          // the kind of gap the audit panel exists to surface, not noise to hide.
+          const key = `${entry.apiName}::${entry.type}`;
+          if (!auditByKey.has(key)) {
+            const baseValue = entry.valuesByLang[BASE_LANG];
+            const missingLanguages = currentActiveLanguages.filter((lang) => !entry.valuesByLang[lang]);
+            const identicalLanguages = currentStyle.flagIdentical
+              ? currentActiveLanguages.filter(
+                  (lang) => lang !== BASE_LANG && baseValue !== undefined && entry.valuesByLang[lang] === baseValue
+                )
+              : [];
+            auditByKey.set(key, {
+              key,
+              entry,
+              element,
+              missingLanguages,
+              identicalLanguages,
+              editable: isEditableEntry(entry),
+              status: missingLanguages.length > 0 ? "missing" : identicalLanguages.length > 0 ? "identical" : "complete",
+            });
+          }
+
+          // Skip the BADGE entirely if NONE of the active languages have anything —
           // avoids injecting an all-"missing" badge on elements the user's active
-          // languages simply don't cover at all (still real noise, unlike a partial
-          // gap on an otherwise-translated entry, which the "missing" chip below now
-          // surfaces instead of silently dropping).
+          // languages simply don't cover at all (still real noise for an inline page
+          // annotation, unlike a partial gap on an otherwise-translated entry, which
+          // the "missing" chip below now surfaces instead of silently dropping).
           const hasAnyValue = currentActiveLanguages.some((lang) => Boolean(entry.valuesByLang[lang]));
           if (!hasAnyValue) return;
           const baseValue = entry.valuesByLang[BASE_LANG];
@@ -259,7 +316,6 @@ async function scan() {
             const identical = currentStyle.flagIdentical && lang !== BASE_LANG && value === baseValue;
             return { lang, value, identical };
           });
-          const element = targets[i].element;
           matchedElements.add(element);
           upsertBadge(element, entry, translations);
         });
@@ -271,6 +327,8 @@ async function scan() {
     for (const element of [...injectedBadges.keys()]) {
       if (!matchedElements.has(element)) removeBadge(element);
     }
+
+    currentOnAuditUpdate?.([...auditByKey.values()]);
   } finally {
     scanInFlight = false;
   }
@@ -281,10 +339,16 @@ function scheduleRescan() {
   rescanTimer = window.setTimeout(() => void scan(), RESCAN_DEBOUNCE_MS);
 }
 
-export function startTranslationMode(activeLanguages: string[], style?: TmStyle, onEditRequest?: TmEditRequestHandler): void {
+export function startTranslationMode(
+  activeLanguages: string[],
+  style?: TmStyle,
+  onEditRequest?: TmEditRequestHandler,
+  onAuditUpdate?: AuditUpdateHandler
+): void {
   currentActiveLanguages = activeLanguages;
   currentStyle = style ?? DEFAULT_TM_STYLE;
   currentOnEditRequest = onEditRequest;
+  currentOnAuditUpdate = onAuditUpdate;
   if (isRunning) {
     void scan();
     return;

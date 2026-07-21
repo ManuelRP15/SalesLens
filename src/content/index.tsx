@@ -2,7 +2,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { deepElementFromPoint, resolveHoverTarget, guessObjectApiNameFromUrl } from "./dom-utils";
 import { Tooltip } from "./Tooltip";
 import tooltipCss from "./tooltip.css?inline";
-import { startTranslationMode, stopTranslationMode, type TmStyle } from "./translation-mode";
+import { startTranslationMode, stopTranslationMode, type AuditEntry, type TmStyle } from "./translation-mode";
+import { AuditPanel, type AuditFilter } from "./AuditPanel";
+import auditPanelCss from "./audit-panel.css?inline";
 import { normalizeBareKey } from "../shared/hotkeys";
 import type { LabelEntry, ResolveTextResponse, SaveTranslationRequest, SaveTranslationResponse, Settings } from "../shared/types";
 
@@ -24,6 +26,11 @@ function tmStyleFromSettings(s: Settings | undefined): TmStyle {
 const HOVER_DEBOUNCE_MS = 120;
 const CLEAR_GRACE_MS = 300;
 const SCROLL_REINSPECT_MS = 80;
+// Guided navigation (ROADMAP.md PHASE 18): scrollIntoView's "smooth" behavior has no
+// completion callback, so the editor opens after a fixed short delay rather than a
+// true "scroll finished" signal — same pragmatic-timing comfort as the constants
+// above, not a new kind of guess.
+const AUDIT_EDITOR_OPEN_DELAY_MS = 450;
 // Small jitter-smoothing margin around the tooltip's own edges — NOT a large "stay
 // away" buffer (that was tried first and caused its own complaint: content the
 // tooltip merely rendered near, not literally over, became unreachable without a
@@ -34,6 +41,8 @@ let hoverTimer: number | undefined;
 let clearTimer: number | undefined;
 let scrollTimer: number | undefined;
 let root: Root | undefined;
+/** The audit panel's own independent React root — see `ensureShadowRoot`'s doc comment for why it shares a shadow root with `root` (the tooltip's) rather than getting a second one. */
+let auditRoot: Root | undefined;
 let shadowHost: HTMLDivElement | undefined;
 let isEnabled = false;
 let activeLanguages: string[] = [];
@@ -96,6 +105,20 @@ let editTriggerCounter = 0;
 let lastTmEditorArgs: { entry: LabelEntry; x: number; y: number } | null = null;
 /** Bumped on every Escape/outside-click while an edit is in progress; see `cancelTrigger` on Tooltip.tsx. */
 let cancelTriggerCounter = 0;
+
+// ── Translation Audit ("Translate All" evolution, ROADMAP.md PHASE 18) ──────
+/** Every on-page entry Translation Mode's own scan resolved, refreshed on every rescan (including the save-triggered one below) — see `handleAuditUpdate`. */
+let auditEntries: AuditEntry[] = [];
+let auditFilter: AuditFilter = "all";
+/** Index into the CURRENTLY FILTERED list, not `auditEntries` itself — AuditPanel re-clamps it against the live filtered array on every render, so a save that shrinks the list can't leave this pointing past the end. */
+let auditIndex = 0;
+/** Collapsed by default (a small pill) — expands into the full panel on click. Reset to a fresh state (collapsed, "All", index 0) every time Translation Mode turns on, see `applyTranslationModeSetting`. */
+let auditExpanded = false;
+/** The floating highlight overlay's own live DOM node + the element it's currently tracking, so `positionHighlight` can resync on scroll/resize and `clearHighlight` can tear both down together. Real page DOM touch — same accepted, fully-reversible exception Translation Mode's badges and the Inspection Mode magnifier cursor already use. */
+let highlightEl: HTMLDivElement | undefined;
+let highlightTarget: Element | null = null;
+let highlightRepositionHandler: (() => void) | undefined;
+let auditEditorOpenTimer: number | undefined;
 
 document.addEventListener(
   "mousemove",
@@ -236,6 +259,15 @@ window.addEventListener(
       closeTmEditor();
       return;
     }
+    // Lowest-priority Escape: collapse the audit panel (ROADMAP.md PHASE 18) back to
+    // its pill — it's a persistent companion, not a transient popover, so it doesn't
+    // auto-collapse on outside clicks the way the tooltip does; Escape is its one
+    // explicit "back out" gesture, same convention as everything above it.
+    if (e.key === "Escape" && auditExpanded) {
+      auditExpanded = false;
+      renderAuditPanel();
+      return;
+    }
     // Enter-to-edit (PHASE 17): only while Inspection Mode is on AND a tooltip is
     // actually showing — unlike the inspector/TM toggle keys above, this one stays
     // silent rather than globally capturing Enter, since Enter is far more likely to
@@ -344,15 +376,152 @@ function loadRealCustomLabels() {
   });
 }
 
+const AUDIT_HIGHLIGHT_STYLE_ID = "sti-audit-highlight-style";
+
+/** One-time keyframe definition for the highlight's brief "this is the one" pulse on activation, settling into a steady outline — see `highlightElement`. Injected once, removed alongside the rest of the audit UI when Translation Mode turns off. */
+function ensureHighlightStylesheet() {
+  if (document.getElementById(AUDIT_HIGHLIGHT_STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = AUDIT_HIGHLIGHT_STYLE_ID;
+  style.textContent =
+    "@keyframes sti-audit-pulse {" +
+    "0% { box-shadow: 0 0 0 2px #1a56db, 0 0 0 2px rgba(26,86,219,.35); }" +
+    "50% { box-shadow: 0 0 0 2px #1a56db, 0 0 0 10px rgba(26,86,219,.05); }" +
+    "100% { box-shadow: 0 0 0 2px #1a56db, 0 0 0 6px rgba(26,86,219,.18); } }" +
+    "#sti-audit-highlight { animation: sti-audit-pulse .6s ease-out; }";
+  document.documentElement.appendChild(style);
+}
+
+/** Resyncs the highlight overlay to its target's LIVE rect — called on scroll/resize while a highlight is active, since `scrollIntoView`'s smooth animation fires many scroll events before settling. */
+function positionHighlight() {
+  if (!highlightEl || !highlightTarget) return;
+  const rect = highlightTarget.getBoundingClientRect();
+  highlightEl.style.left = `${rect.left - 4}px`;
+  highlightEl.style.top = `${rect.top - 4}px`;
+  highlightEl.style.width = `${Math.max(rect.width + 8, 4)}px`;
+  highlightEl.style.height = `${Math.max(rect.height + 8, 4)}px`;
+}
+
+function clearHighlight() {
+  window.clearTimeout(auditEditorOpenTimer);
+  if (highlightRepositionHandler) {
+    window.removeEventListener("scroll", highlightRepositionHandler, true);
+    window.removeEventListener("resize", highlightRepositionHandler);
+    highlightRepositionHandler = undefined;
+  }
+  highlightEl?.remove();
+  highlightEl = undefined;
+  highlightTarget = null;
+}
+
+/**
+ * The guided-navigation "this is the one" marker (ROADMAP.md PHASE 18) — a single
+ * floating overlay synced to the target's live rect via `positionHighlight`, rather
+ * than a class/inline style applied to the target element itself: safer (never risks
+ * fighting Salesforce's own CSS on the real element) and trivially reversible (just
+ * remove the overlay node). Only ONE highlight exists at a time — a new call clears
+ * the previous one first, which is exactly why the overlap problem that killed
+ * Translation Mode's OWN v1 (dozens of simultaneous floating cards, `#19`) doesn't
+ * apply here: guided navigation only ever highlights the ONE entry being worked on.
+ */
+function highlightElement(el: Element) {
+  clearHighlight();
+  ensureHighlightStylesheet();
+  highlightTarget = el;
+  highlightEl = document.createElement("div");
+  highlightEl.id = "sti-audit-highlight";
+  highlightEl.style.cssText =
+    "position:fixed;z-index:2147483644;pointer-events:none;border-radius:6px;" +
+    "box-shadow:0 0 0 2px #1a56db, 0 0 0 6px rgba(26,86,219,.18);" +
+    "transition:left .2s,top .2s,width .2s,height .2s;";
+  document.documentElement.appendChild(highlightEl);
+  positionHighlight();
+  highlightRepositionHandler = () => positionHighlight();
+  window.addEventListener("scroll", highlightRepositionHandler, { passive: true, capture: true });
+  window.addEventListener("resize", highlightRepositionHandler, { passive: true });
+}
+
+function renderAuditPanel() {
+  ensureAuditHost().render(
+    <AuditPanel
+      entries={auditEntries}
+      filter={auditFilter}
+      onFilterChange={handleAuditFilterChange}
+      currentIndex={auditIndex}
+      onNavigate={handleAuditNavigate}
+      expanded={auditExpanded}
+      onToggleExpanded={handleAuditToggleExpanded}
+    />
+  );
+}
+
+function handleAuditUpdate(entries: AuditEntry[]) {
+  auditEntries = entries;
+  renderAuditPanel();
+}
+
+function handleAuditFilterChange(filter: AuditFilter) {
+  auditFilter = filter;
+  auditIndex = 0;
+  clearHighlight();
+  renderAuditPanel();
+}
+
+function handleAuditToggleExpanded() {
+  auditExpanded = !auditExpanded;
+  renderAuditPanel();
+}
+
+/**
+ * Scrolls to and highlights the target unconditionally, then — only for `missing`/
+ * `identical` entries that are actually editable — opens the SAME editor a
+ * Translation Mode chip click would (`openTmEditor`), pre-seeded on the SPECIFIC
+ * language that made the entry match the current filter, not just the first one.
+ * `complete` entries (or a non-editable type, e.g. a standard field/picklist,
+ * `ObjectLabel`) still scroll/highlight so the user can SEE it, but no editor
+ * auto-opens — there's either nothing to fix or nothing to write back to yet.
+ */
+function handleAuditNavigate(index: number, entry: AuditEntry) {
+  auditIndex = index;
+  renderAuditPanel();
+  entry.element.scrollIntoView({ behavior: "smooth", block: "center" });
+  highlightElement(entry.element);
+  window.clearTimeout(auditEditorOpenTimer);
+  if (!entry.editable) return;
+  const relevantLanguage =
+    entry.status === "missing"
+      ? entry.missingLanguages[0]
+      : entry.status === "identical"
+        ? entry.identicalLanguages[0]
+        : undefined;
+  if (!relevantLanguage) return;
+  auditEditorOpenTimer = window.setTimeout(() => {
+    const rect = entry.element.getBoundingClientRect();
+    openTmEditor(entry.entry, relevantLanguage, rect.left + 12, rect.bottom + 8);
+  }, AUDIT_EDITOR_OPEN_DELAY_MS);
+}
+
 function applyTranslationModeSetting(enabled: boolean) {
   translationModeEnabled = enabled;
   if (translationModeEnabled) {
     exitInspectionMode();
     clearTooltip();
-    startTranslationMode(activeLanguages, tmStyle, openTmEditor);
+    // Fresh audit state every time Translate All turns on — a stale filter/position
+    // from a previous activation (possibly on a different page) would be confusing,
+    // not helpful, to carry forward.
+    auditEntries = [];
+    auditFilter = "all";
+    auditIndex = 0;
+    auditExpanded = false;
+    renderAuditPanel();
+    startTranslationMode(activeLanguages, tmStyle, openTmEditor, handleAuditUpdate);
   } else {
     stopTranslationMode();
     clearTooltip();
+    clearHighlight();
+    auditEntries = [];
+    ensureAuditHost().render(null);
+    document.getElementById(AUDIT_HIGHLIGHT_STYLE_ID)?.remove();
   }
 }
 
@@ -390,7 +559,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     applyTranslationModeSetting(nextTranslationMode);
   } else if (nextTranslationMode) {
     // Translation Mode stayed on but the languages or chip style may have changed.
-    startTranslationMode(activeLanguages, tmStyle, openTmEditor);
+    startTranslationMode(activeLanguages, tmStyle, openTmEditor, handleAuditUpdate);
   }
 });
 
@@ -400,12 +569,25 @@ chrome.runtime.onMessage.addListener((message: { type: string }) => {
 
 loadRealCustomLabels();
 
-function ensureHost(): Root {
-  if (root && shadowHost) return root;
+/**
+ * One closed Shadow DOM root shared by the tooltip AND the audit panel (both are
+ * independent `createRoot()` mounts inside it — see `ensureHost`/`ensureAuditHost`),
+ * rather than a second closed shadow root: same isolation guarantee (CLAUDE.md rule
+ * #3), one less shadow tree to manage, and — critically — two INDEPENDENT React
+ * roots means rendering one never clears the other, unlike sharing a single root
+ * would (`host.render()` replaces whatever was mounted there).
+ */
+function ensureShadowRoot(): ShadowRoot {
+  if (shadowHost?.shadowRoot) return shadowHost.shadowRoot;
   shadowHost = document.createElement("div");
   shadowHost.id = "sti-root";
   document.documentElement.appendChild(shadowHost);
-  const shadow = shadowHost.attachShadow({ mode: "closed" });
+  return shadowHost.attachShadow({ mode: "closed" });
+}
+
+function ensureHost(): Root {
+  if (root) return root;
+  const shadow = ensureShadowRoot();
   const style = document.createElement("style");
   style.textContent = tooltipCss;
   shadow.appendChild(style);
@@ -413,6 +595,18 @@ function ensureHost(): Root {
   shadow.appendChild(mountPoint);
   root = createRoot(mountPoint);
   return root;
+}
+
+function ensureAuditHost(): Root {
+  if (auditRoot) return auditRoot;
+  const shadow = ensureShadowRoot();
+  const style = document.createElement("style");
+  style.textContent = auditPanelCss;
+  shadow.appendChild(style);
+  const mountPoint = document.createElement("div");
+  shadow.appendChild(mountPoint);
+  auditRoot = createRoot(mountPoint);
+  return auditRoot;
 }
 
 function clearTooltip() {
@@ -463,6 +657,16 @@ function saveTranslation(
         if (chrome.runtime.lastError || !response) {
           resolve({ ok: false, error: "Extension error — please try again." });
           return;
+        }
+        // A successful save happens inside this extension's own CLOSED shadow root,
+        // so the page-level MutationObserver that normally re-triggers Translation
+        // Mode's rescan never fires from it — without this explicit refresh, a saved
+        // edit would leave the on-page badge AND the audit panel's counts stale until
+        // some UNRELATED page mutation happened to retrigger a scan (ROADMAP.md
+        // PHASE 18's concurrency section). `startTranslationMode` while already
+        // running is already a safe "just rescan now" no-op path.
+        if (response.ok && translationModeEnabled) {
+          startTranslationMode(activeLanguages, tmStyle, openTmEditor, handleAuditUpdate);
         }
         resolve(response);
       }
