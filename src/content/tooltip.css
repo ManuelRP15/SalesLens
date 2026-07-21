@@ -19,17 +19,16 @@
   border-radius: 6px;
   box-shadow: 0 4px 14px rgba(22, 50, 92, 0.18);
   padding: 10px 12px;
-  /* pointer-events:none on the box itself, restored to "auto" only on the actual
-     interactive controls below (buttons, the edit textarea). This is what lets the
-     cursor "see through" the tooltip's background to whatever real page element it
-     happens to be covering — elementFromPoint skips pointer-events:none elements
-     entirely — instead of that content being permanently unreachable until the user
-     clicks outside/Escape to reset. Only the controls someone actually needs to click
-     stay solid; everything else is informational and was never meant to block the
-     page underneath it. See content/index.tsx's hover-ownership zone for the other
-     half of this: an exact match against the closed shadow host (only reachable via
-     one of the "auto" elements below) still means "stay pinned to the tooltip." */
-  pointer-events: none;
+  /* The tooltip is a SOLID surface (pointer-events:auto). A click anywhere inside it
+     is captured and — because it lives in a closed shadow root — retargets to the
+     shadow host for any document-level listener, so the click-outside handler in
+     content/index.tsx sees `e.target === shadowHost` and keeps the tooltip open. This
+     is what makes "the tooltip persists unless you click OUTSIDE it, press Escape, or
+     toggle the key again" reliable by construction, with no geometry/rect math to get
+     stale (see DECISIONS.md #54, which supersedes #45/#52's pointer-events:none
+     approach — that let clicks pass through to the page underneath but made the
+     tooltip close on those very clicks, the exact behavior real-org testing rejected). */
+  pointer-events: auto;
 }
 
 .sti-tooltip__title {
@@ -158,9 +157,6 @@
   padding: 2px 6px;
   cursor: pointer;
   white-space: nowrap;
-  /* The tooltip box itself is pointer-events:none (see .sti-tooltip) — every actual
-     control needs this restored individually or it becomes unclickable too. */
-  pointer-events: auto;
 }
 
 .sti-copy-btn:hover {

@@ -41,19 +41,73 @@ export function isMetadataWriteType(type: LabelType): boolean {
   return METADATA_WRITE_TYPES.has(type);
 }
 
+/**
+ * Optimistic-concurrency decision for the deploy()-backed types, comparing the RIGHT
+ * two things (see DECISIONS.md #54). `currentValue` is what lives in the deployable XML
+ * file — an admin OVERRIDE, or "" when none exists. `expectedValue` is what the tooltip
+ * displayed, which is the EFFECTIVE label: an override when the language was customized,
+ * but otherwise Salesforce's own STANDARD translation, which never lives in this file at
+ * all. Naively comparing the file's override against a standard value always mismatched,
+ * producing a bogus "someone else changed it" conflict that blanked the row (real-org
+ * bug: "desaparece la traducción y se quita el idioma"). Two legitimate no-conflict
+ * states, so this returns false for them:
+ *   (a) the file already holds exactly what we displayed (an override we saw), or
+ *   (b) the language showed a STANDARD value (`showedStandardValue`) and the file still
+ *       has no override for it — precisely the gap this edit is about to fill.
+ * Anything else is a genuine drift: the file holds a value we neither displayed nor
+ * expected, so someone changed it underneath us and we must not overwrite it.
+ */
+export function isWriteConflict(currentValue: string, expectedValue: string, showedStandardValue: boolean): boolean {
+  if (currentValue === expectedValue) return false;
+  if (showedStandardValue && currentValue === "") return false;
+  return true;
+}
+
 export function splitLast(value: string, sep: string): [string, string] {
   const idx = value.lastIndexOf(sep);
   return idx === -1 ? [value, ""] : [value.slice(0, idx), value.slice(idx + 1)];
 }
 
 /**
+ * Inserts a brand-new `{ [containerTag]: ... }` wrapper node into `parentChildren` at
+ * a position that keeps Salesforce's metadata XSD happy, instead of blindly appending
+ * at the very end (see DECISIONS.md #55 — this was a real, org-breaking bug: appending
+ * after unrelated later-in-schema elements like `<layouts>`/`<validationRules>`
+ * produced a SECOND, non-contiguous `<fields>` group, which Salesforce's deploy
+ * validator rejects outright with "Element fields is duplicated at this location").
+ * Metadata XSDs declare repeatable child elements in alphabetical order and require
+ * same-tag elements to stay contiguous, so: if same-tag siblings already exist,
+ * insert right after the LAST one (keeps the group contiguous regardless of where it
+ * sits); otherwise insert right before the first sibling whose tag sorts after
+ * `containerTag` alphabetically, or at the end if there isn't one.
+ */
+function insertContainerNode(parentChildren: XmlAstNode[], containerTag: string, wrapper: XmlAstNode): void {
+  const tagOf = (n: XmlAstNode) => Object.keys(n).find((k) => k !== ":@");
+  for (let i = parentChildren.length - 1; i >= 0; i--) {
+    if (tagOf(parentChildren[i]) === containerTag) {
+      parentChildren.splice(i + 1, 0, wrapper);
+      return;
+    }
+  }
+  for (let i = 0; i < parentChildren.length; i++) {
+    const tag = tagOf(parentChildren[i]);
+    if (tag && tag > containerTag) {
+      parentChildren.splice(i, 0, wrapper);
+      return;
+    }
+  }
+  parentChildren.push(wrapper);
+}
+
+/**
  * Finds the repeated `containerTag` block (e.g. one `<fields>` entry) whose
  * `matchTag` child text equals `matchValue`, returning that block's own children
- * array to read/patch a leaf within — or, if none exists yet, appends a brand new
- * block already seeded with `matchTag`, ready for a leaf to be added to it. This is
- * the ONE shared shape behind fields/recordTypes/webLinks/quickActions/customTabs/
- * customApplications/picklistValues — they're all "a list of blocks identified by one
- * child, holding another child as the actual value."
+ * array to read/patch a leaf within — or, if none exists yet, inserts a brand new
+ * block (via `insertContainerNode`, schema-order-safe) already seeded with
+ * `matchTag`, ready for a leaf to be added to it. This is the ONE shared shape behind
+ * fields/recordTypes/webLinks/quickActions/customTabs/customApplications/
+ * picklistValues — they're all "a list of blocks identified by one child, holding
+ * another child as the actual value."
  */
 export function locateOrCreateBlock(
   rootChildren: XmlAstNode[],
@@ -66,7 +120,7 @@ export function locateOrCreateBlock(
   );
   if (existing) return existing;
   const fresh: XmlAstNode[] = [{ [matchTag]: [{ "#text": matchValue }] }];
-  rootChildren.push({ [containerTag]: fresh });
+  insertContainerNode(rootChildren, containerTag, { [containerTag]: fresh });
   return fresh;
 }
 
@@ -375,7 +429,9 @@ export async function saveMetadataTranslation(
   const rootChildren = rootWrapper[target.rootTag] as XmlAstNode[];
 
   const { currentValue, setValue } = target.apply(rootChildren);
-  if (currentValue !== expectedValue) {
+
+  const showedStandardValue = !(entry.customizedLanguages?.includes(language) ?? false);
+  if (isWriteConflict(currentValue, expectedValue, showedStandardValue)) {
     return { conflict: true, currentValue };
   }
 
@@ -385,7 +441,25 @@ export async function saveMetadataTranslation(
   const result = await deployMetadataFile(apiHost, sessionId, target.deployType, target.deployMember, target.filePath, patchedXml);
   if (!result.success) {
     const problem = result.componentFailures[0]?.problem ?? result.errorMessage ?? "Deploy failed.";
-    throw new Error(problem);
+    throw new Error(describeDeployFailure(entry, problem));
   }
   return {};
+}
+
+/**
+ * Turns a raw Metadata API deploy error into something a translator can act on. Today
+ * this only special-cases global/standard quick actions: they're surfaced on an
+ * object's layout, so they look object-scoped, but their translations don't live in
+ * that object's CustomObjectTranslation — Salesforce rejects the deploy with "no
+ * QuickAction named X found". Rather than leak that (or guess at an unverified global
+ * `Translations` route), we say plainly that it isn't supported yet (DECISIONS.md #54).
+ * The deploy is transactional, so nothing was written — the row keeps its value and the
+ * editor just shows this message. Any other failure passes through unchanged; the raw
+ * Salesforce text is usually the most accurate thing we can show.
+ */
+function describeDeployFailure(entry: LabelEntry, problem: string): string {
+  if (entry.type === "QuickAction" && /no QuickAction named/i.test(problem)) {
+    return "This looks like a standard or global action — editing its translation from here isn't supported yet.";
+  }
+  return problem;
 }
