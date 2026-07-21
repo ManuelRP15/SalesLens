@@ -310,6 +310,27 @@ export const DEFAULT_INSPECTOR_HOTKEY = "Alt";
 export const DEFAULT_HOLD_HOTKEY = "Shift";
 export const DEFAULT_TM_HOTKEY = "Alt+T";
 
+/**
+ * One captured translation edit — the Workspace's unit of record (PHASE 16). Captured
+ * automatically by the background's `saveTranslation()` on every SUCCESSFUL save (the
+ * one choke point every write already goes through), persisted under
+ * `chrome.storage.local`'s `workspaceEdits` key. Keyed by (type, apiName, language):
+ * a later edit of the same key updates `newValue`/`timestamp` but keeps the FIRST
+ * capture's `oldValue` — the org's value before this Workspace touched it, which is
+ * what the before/after comparator shows and what a future per-item Safe Undo would
+ * restore. Fold rule lives in `shared/workspace.ts`'s `recordEdit`.
+ */
+export interface WorkspaceEdit {
+  type: LabelType;
+  apiName: string;
+  language: string;
+  /** The effective value the user saw before their FIRST edit of this key ("" when none existed). */
+  oldValue: string;
+  newValue: string;
+  /** Epoch ms of the LATEST save of this key. */
+  timestamp: number;
+}
+
 /** One row of the Translation Health registry — which languages a given element is missing, and which merely repeat the base-language value (see `Settings.flagIdenticalTranslations`). */
 export interface TranslationHealthEntry {
   apiName: string;

@@ -14,6 +14,7 @@ export default defineConfig({
       // explicitly gets it processed the same way the popup is.
       input: {
         health: "src/health/index.html",
+        workspace: "src/workspace/index.html",
       },
     },
   },

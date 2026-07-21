@@ -3,6 +3,7 @@ import { MOCK_LABEL_ENTRIES } from "../shared/mock-data";
 import { fetchAllTranslations, saveCustomLabelTranslation, toApiHost } from "../shared/salesforce-api";
 import { fetchMetadataTranslationEntries } from "../shared/metadata-translations";
 import { saveMetadataTranslation } from "../shared/metadata-write";
+import { recordEdit } from "../shared/workspace";
 import { BASE_LANGUAGE, isEditableEntry, isInSimpleScope } from "../shared/types";
 import type {
   ResolveTextRequest,
@@ -15,6 +16,7 @@ import type {
   Settings,
   LabelEntry,
   TranslationHealthEntry,
+  WorkspaceEdit,
 } from "../shared/types";
 
 console.log("[STI] ### background loaded - PHASE 4 version ###");
@@ -234,11 +236,38 @@ async function saveTranslation(req: SaveTranslationRequest): Promise<SaveTransla
       entry.customizedLanguages = [...customized];
     }
     await setIndexFromRealData(allEntries);
+
+    // PHASE 16 (Workspace): a successful save is the ONE capture point — the edit and
+    // its pre-edit value feed the Workspace automatically. `expectedValue` is the
+    // effective value the user saw when the editor opened, which the write path just
+    // verified against the live org — exactly the "before" the comparator (and a
+    // future Safe Undo) needs. Capture must never break the save it records (the
+    // write already happened), so failures only log.
+    try {
+      await recordWorkspaceEdit({
+        type: req.labelType,
+        apiName: req.apiName,
+        language: req.language,
+        oldValue: req.expectedValue,
+        newValue: req.value,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      console.warn("[STI] workspace capture failed:", err);
+    }
+
     return { ok: true, entry };
   } catch (err) {
     console.warn("[STI] saveTranslation error:", err);
     return { ok: false, error: err instanceof Error ? err.message : "Save failed." };
   }
+}
+
+/** PHASE 16: folds one captured edit into the persisted Workspace (fold rule: shared/workspace.ts's recordEdit). */
+async function recordWorkspaceEdit(edit: WorkspaceEdit): Promise<void> {
+  const stored = await chrome.storage.local.get("workspaceEdits");
+  const edits = (stored.workspaceEdits as WorkspaceEdit[] | undefined) ?? [];
+  await chrome.storage.local.set({ workspaceEdits: recordEdit(edits, edit) });
 }
 
 type IncomingMessage =

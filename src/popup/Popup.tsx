@@ -554,6 +554,22 @@ export function Popup() {
       >
         Open Translation Health
       </button>
+
+      <button
+        onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("src/workspace/index.html") })}
+        style={{
+          marginTop: 6,
+          width: "100%",
+          padding: "6px 0",
+          fontSize: 13,
+          borderRadius: 4,
+          border: "1px solid #d8dde6",
+          background: "#fff",
+          cursor: "pointer",
+        }}
+      >
+        Open Workspace
+      </button>
     </div>
   );
 }

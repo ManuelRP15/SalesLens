@@ -1,7 +1,7 @@
 import { unzipSync, strFromU8, zipSync, strToU8 } from "fflate";
 import { XMLParser, XMLBuilder } from "fast-xml-parser";
 
-const METADATA_API_VERSION = "61.0";
+export const METADATA_API_VERSION = "61.0";
 const RETRIEVE_POLL_INTERVAL_MS = 1500;
 const RETRIEVE_MAX_POLLS = 20;
 // Deploys can genuinely take longer than a small single-file retrieve — a longer
