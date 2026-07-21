@@ -31,7 +31,18 @@ const DEFAULT_SETTINGS: Settings = {
   holdHotkey: "Shift",
   tmHotkey: "Alt+T",
   simpleMode: true,
+  flagIdenticalTranslations: true,
 };
+
+/**
+ * Base/source language every entry is seeded from — same assumption already made by
+ * `metadata-translations.ts`'s own `BASE_LANG` and `salesforce-api.ts`'s
+ * `CUSTOM_LABEL_BASE_LANGUAGE` (DECISIONS.md #41: untested against a non-English-base
+ * org). Kept as its own local constant here rather than importing either of those
+ * module-internal ones, matching how this codebase already duplicates this exact value
+ * rather than threading a shared import through unrelated modules.
+ */
+const HEALTH_BASE_LANG = "en_US";
 
 let reverseIndex: ReverseIndex = buildReverseIndex(MOCK_LABEL_ENTRIES);
 // Same entries the reverse index was built from, kept as a flat list too — the index
@@ -93,15 +104,30 @@ async function getSessionId(apiHost: string): Promise<string | null> {
   }
 }
 
-/** Which of the user's active languages each entry has no translated value for. Scoped by simpleMode (DECISIONS.md #56) — same "what's out of scope stays invisible everywhere" rule as hover/Translation Mode, not just the health report's own separate filter. */
+/**
+ * Which of the user's active languages each entry has no translated value for, and
+ * which merely repeat the base-language value (PRODUCT.md MVP capability #4's
+ * "identical to the source language" check — a soft signal, not scoped by
+ * `flagIdenticalTranslations` here since that's a display-time concern for whoever
+ * reads this data; both surfaces (Translation Mode, Translation Health) apply the
+ * setting themselves). Scoped by simpleMode (DECISIONS.md #56) — same "what's out of
+ * scope stays invisible everywhere" rule as hover/Translation Mode, not just the health
+ * report's own separate filter.
+ */
 function computeTranslationHealth(entries: LabelEntry[], languages: string[], simpleMode: boolean): TranslationHealthEntry[] {
   return entries
     .filter((entry) => !simpleMode || isInSimpleScope(entry.type))
-    .map((entry) => ({
-      apiName: entry.apiName,
-      type: entry.type,
-      missingLanguages: languages.filter((lang) => !entry.valuesByLang[lang]),
-    }));
+    .map((entry) => {
+      const baseValue = entry.valuesByLang[HEALTH_BASE_LANG];
+      return {
+        apiName: entry.apiName,
+        type: entry.type,
+        missingLanguages: languages.filter((lang) => !entry.valuesByLang[lang]),
+        identicalToSourceLanguages: baseValue
+          ? languages.filter((lang) => lang !== HEALTH_BASE_LANG && entry.valuesByLang[lang] === baseValue)
+          : [],
+      };
+    });
 }
 
 /**

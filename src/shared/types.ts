@@ -279,15 +279,35 @@ export interface Settings {
    * removed, just not the default surface.
    */
   simpleMode: boolean;
+  /**
+   * Flags translations whose value is byte-identical to the base-language value —
+   * a soft, visual-only "might not actually be translated" hint (PRODUCT.md MVP
+   * capability #4), shown as a chip mark in Translation Mode and a count in
+   * Translation Health. Default true; a toggle exists because it's a real judgment
+   * call, not a hard rule — short strings, numbers, and brand names legitimately
+   * match across languages, and this project's "zero false positives" bar means
+   * anyone who finds it noisy for their org should be able to turn it off outright
+   * rather than live with a flag they've learned to ignore.
+   */
+  flagIdenticalTranslations: boolean;
 }
 
 export const DEFAULT_INSPECTOR_HOTKEY = "Alt";
 export const DEFAULT_HOLD_HOTKEY = "Shift";
 export const DEFAULT_TM_HOTKEY = "Alt+T";
 
-/** One row of the Translation Health registry — which languages a given element is missing. */
+/** One row of the Translation Health registry — which languages a given element is missing, and which merely repeat the base-language value (see `Settings.flagIdenticalTranslations`). */
 export interface TranslationHealthEntry {
   apiName: string;
   type: LabelType;
   missingLanguages: string[];
+  /**
+   * Active, non-base languages whose value is byte-identical to the base-language
+   * (`en_US`, DECISIONS.md #41's existing assumption) value — a real possible failure
+   * mode (source pasted into the translation field instead of translating it), but not
+   * always wrong (short strings, numbers, brand names legitimately match across
+   * languages) — hence `Settings.flagIdenticalTranslations` gating whether this is
+   * surfaced at all. Computed alongside `missingLanguages`, same data, no new fetches.
+   */
+  identicalToSourceLanguages: string[];
 }

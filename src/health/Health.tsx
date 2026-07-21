@@ -10,13 +10,50 @@ const LANG_NAMES: Record<string, string> = {
 interface LoadedState {
   entries: TranslationHealthEntry[];
   languages: string[];
+  flagIdentical: boolean;
 }
 
 async function loadHealth(): Promise<LoadedState> {
   const stored = await chrome.storage.local.get(["translationHealth", "settings"]);
   const entries = (stored.translationHealth as TranslationHealthEntry[] | undefined) ?? [];
   const settings = stored.settings as Settings | undefined;
-  return { entries, languages: settings?.activeLanguages ?? [] };
+  return {
+    entries,
+    languages: settings?.activeLanguages ?? [],
+    flagIdentical: settings?.flagIdenticalTranslations ?? true,
+  };
+}
+
+/** One labeled group of `apiName (type)` rows in an expanded language's detail panel — shared shape for "Missing" and "Possibly untranslated" so the two read as one system rather than differently-styled lists. */
+function renderEntryList(label: string, entries: TranslationHealthEntry[]) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, textTransform: "uppercase", color: "#706e6b", marginBottom: 4 }}>{label}</div>
+      <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 4 }}>
+        {entries.map((e) => {
+          const colors = TYPE_COLORS[e.type];
+          return (
+            <li key={e.apiName + e.type} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  background: colors.bg,
+                  color: colors.color,
+                  borderRadius: 4,
+                  padding: "1px 6px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {TYPE_LABELS[e.type]}
+              </span>
+              <code style={{ fontSize: 12 }}>{e.apiName}</code>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 export function Health() {
@@ -31,7 +68,7 @@ export function Health() {
     return <div style={{ padding: 24 }}>Loading…</div>;
   }
 
-  const { entries, languages } = state;
+  const { entries, languages, flagIdentical } = state;
 
   if (entries.length === 0) {
     return (
@@ -71,12 +108,14 @@ export function Health() {
           <tr style={{ textAlign: "left", borderBottom: "2px solid #d8dde6" }}>
             <th style={{ padding: "8px 6px" }}>Language</th>
             <th style={{ padding: "8px 6px" }}>Missing</th>
+            {flagIdentical && <th style={{ padding: "8px 6px" }}>Possibly untranslated</th>}
             <th style={{ padding: "8px 6px" }}>Coverage</th>
           </tr>
         </thead>
         <tbody>
           {languages.map((lang) => {
             const missing = entries.filter((e) => e.missingLanguages.includes(lang));
+            const identical = entries.filter((e) => e.identicalToSourceLanguages.includes(lang));
             const coverage = Math.round(((entries.length - missing.length) / entries.length) * 100);
             const isExpanded = expandedLang === lang;
             return (
@@ -92,6 +131,11 @@ export function Health() {
                   <td style={{ padding: "8px 6px", color: missing.length > 0 ? "#a06400" : "#1a7f4e" }}>
                     {missing.length}
                   </td>
+                  {flagIdentical && (
+                    <td style={{ padding: "8px 6px", color: identical.length > 0 ? "#b8860b" : "#706e6b" }}>
+                      {identical.length}
+                    </td>
+                  )}
                   <td style={{ padding: "8px 6px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div style={{ flex: 1, background: "#eef1f6", borderRadius: 4, height: 8, maxWidth: 160 }}>
@@ -110,33 +154,21 @@ export function Health() {
                 </tr>
                 {isExpanded && (
                   <tr key={`${lang}-details`}>
-                    <td colSpan={3} style={{ padding: "4px 6px 14px 24px", background: "#f9fafb" }}>
-                      {missing.length === 0 ? (
+                    <td colSpan={flagIdentical ? 4 : 3} style={{ padding: "4px 6px 14px 24px", background: "#f9fafb" }}>
+                      {missing.length === 0 && identical.length === 0 ? (
                         <span style={{ color: "#1a7f4e", fontSize: 13 }}>Everything translated ✓</span>
                       ) : (
-                        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 4 }}>
-                          {missing.map((e) => {
-                            const colors = TYPE_COLORS[e.type];
-                            return (
-                              <li key={e.apiName + e.type} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    fontWeight: 600,
-                                    background: colors.bg,
-                                    color: colors.color,
-                                    borderRadius: 4,
-                                    padding: "1px 6px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {TYPE_LABELS[e.type]}
-                                </span>
-                                <code style={{ fontSize: 12 }}>{e.apiName}</code>
-                              </li>
-                            );
-                          })}
-                        </ul>
+                        <>
+                          {missing.length > 0 && renderEntryList("Missing", missing)}
+                          {flagIdentical && identical.length > 0 && (
+                            <div style={{ marginTop: missing.length > 0 ? 10 : 0 }}>
+                              {renderEntryList(
+                                "Possibly untranslated — identical to the source language",
+                                identical
+                              )}
+                            </div>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>
