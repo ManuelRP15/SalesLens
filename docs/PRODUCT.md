@@ -19,7 +19,7 @@ context of the current page.
 
 ### Guiding principle: modular architecture
 Don't implement every capability below at once. Each capability (Hover Inspector,
-Translation Inspector, Translation Mode, Translation Health, etc.) should be its own
+Translation Inspector, Translation Mode, Workspace, etc.) should be its own
 independent module that can be enabled, extended, or skipped in a given phase without
 entangling the others. This keeps the project maintainable and lets the roadmap react
 to real user feedback instead of a fixed master plan.
@@ -59,15 +59,16 @@ to real user feedback instead of a fixed master plan.
    live. This status line was stale until 2026-07-21; don't trust a capability's
    status here without cross-checking ROADMAP.md's phase.*
 
-4. **Translation Health** — automatically analyze translation quality: untranslated
-   languages, empty translations, translations identical to the source language
-   (configurable), possible inconsistencies. Show discreet visual warnings.
+4. **Translation quality signals** — automatically flag untranslated languages, empty
+   translations, and translations identical to the source language (configurable).
+   Show discreet visual warnings **in context**, where the user already is.
    *Status: missing-translation highlighting (tooltip since PHASE 4, distinct
-   "missing" chips in Translation Mode + org-wide health table since PHASE 9/10) and
-   identical-to-source-language detection (configurable via
-   `Settings.flagIdenticalTranslations`) both shipped 2026-07-21 (DECISIONS.md #58).
-   Other consistency checks (duplicated values, broken/truncated text) still open,
-   see ROADMAP.md PHASE 10's QA Report v2.*
+   "missing" chips in Translation Mode + the audit panel's Missing/Identical filters)
+   and identical-to-source detection (`Settings.flagIdenticalTranslations`) shipped
+   2026-07-21 (DECISIONS.md #58). The separate org-wide "Translation Health" page was
+   REMOVED from the product 2026-07-22 (DECISIONS.md #66): the in-context surfaces
+   (Translate All + tooltip) proved to be where this capability actually gets used;
+   the product direction is Inspect + Translate All + Workspace.*
 
 5. **Language configuration** — each user can choose their primary languages, their
    order, colors, icons, and compact vs. expanded mode; the extension remembers these
@@ -140,7 +141,7 @@ disproportionate edge-case risk for how rarely they're the actual thing someone'
 hunting for (global-vs-object-specific quick actions, standard-vs-custom picklist
 write mechanisms, platform-controlled strings with no admin value to show at all).
 **"Simple mode" (default ON) is the product's default surface** — hover, Translation
-Mode, and Translation Health only show the core four types unless the user explicitly
+Mode, and the audit panel only show the core four types unless the user explicitly
 opts into "Advanced" (a single toggle, not a matrix of per-type switches — matching the
 "never dump options just because available" restraint below). This is a scope decision
 about what's DEFAULT, not what's BUILT: nothing already shipped gets removed, it's

@@ -31,7 +31,7 @@ export default defineManifest({
   // popup open it via chrome.tabs.create(chrome.runtime.getURL(...)).
   web_accessible_resources: [
     {
-      resources: ["src/health/index.html"],
+      resources: ["src/workspace/index.html"],
       matches: ["https://*.lightning.force.com/*"],
     },
   ],

@@ -120,7 +120,7 @@ export function isEditableEntry(entry: LabelEntry): boolean {
  * object-specific quick actions, standard-vs-custom picklist mechanisms, XSD ordering...)
  * for how rarely they're the actual translation gap someone's chasing. Simple mode
  * doesn't remove anything already built — it just doesn't SURFACE the advanced types
- * via hover/Translation Mode/Translation Health until the user opts into Advanced mode.
+ * via hover, Translation Mode, or the audit panel until the user opts into Advanced mode.
  */
 const SIMPLE_SCOPE_TYPES: ReadonlySet<LabelType> = new Set(["ObjectLabel", "FieldLabel", "PicklistValue", "CustomLabel"]);
 
@@ -131,8 +131,8 @@ export function isInSimpleScope(type: LabelType): boolean {
 /**
  * The base/source language every entry is seeded from — read-side modules that need
  * "which language is the point of comparison" (Quick Compare's identical-to-source
- * flag, `metadata-translations.ts`'s describe/seed calls, Translation Health's own
- * check) all share this ONE constant instead of each declaring their own copy of the
+ * flag, `metadata-translations.ts`'s describe/seed calls, Translation Mode's identical
+ * marks) all share this ONE constant instead of each declaring their own copy of the
  * same literal. Still an unverified assumption against a non-English-base org
  * (DECISIONS.md #41) — centralizing it here means that gets fixed in exactly one
  * place if it's ever wrong, not four. Deliberately NOT used by `salesforce-api.ts`'s
@@ -288,7 +288,7 @@ export interface Settings {
   /**
    * Simple mode (default true, DECISIONS.md #56/PRODUCT.md): only surface
    * Object/Field/Picklist/Custom Label translations via hover, Translation Mode, and
-   * Translation Health. Advanced types (buttons, quick actions, tabs, apps, record
+   * the audit panel. Advanced types (buttons, quick actions, tabs, apps, record
    * types, layout sections) stay fully built and reachable by turning this off — never
    * removed, just not the default surface.
    */
@@ -296,8 +296,8 @@ export interface Settings {
   /**
    * Flags translations whose value is byte-identical to the base-language value —
    * a soft, visual-only "might not actually be translated" hint (PRODUCT.md MVP
-   * capability #4), shown as a chip mark in Translation Mode and a count in
-   * Translation Health. Default true; a toggle exists because it's a real judgment
+   * capability #4), shown as a chip mark in Translation Mode and the tooltip's "≈"
+   * hint. Default true; a toggle exists because it's a real judgment
    * call, not a hard rule — short strings, numbers, and brand names legitimately
    * match across languages, and this project's "zero false positives" bar means
    * anyone who finds it noisy for their org should be able to turn it off outright
@@ -310,18 +310,60 @@ export const DEFAULT_INSPECTOR_HOTKEY = "Alt";
 export const DEFAULT_HOLD_HOTKEY = "Shift";
 export const DEFAULT_TM_HOTKEY = "Alt+T";
 
-/** One row of the Translation Health registry — which languages a given element is missing, and which merely repeat the base-language value (see `Settings.flagIdenticalTranslations`). */
-export interface TranslationHealthEntry {
-  apiName: string;
+/**
+ * One captured translation edit — a Workspace item (PHASE 16, `DECISIONS.md #65`).
+ * Captured automatically by the background's `saveTranslation()` on every SUCCESSFUL
+ * save (the one choke point every write already goes through). Keyed by
+ * (type, apiName, language): a later edit of the same key updates
+ * `newValue`/`timestamp` but keeps the FIRST capture's `oldValue` — the org's value
+ * before this Workspace touched it, which is what the before/after comparator shows
+ * and what a future per-item Safe Undo would restore. Fold rule lives in
+ * `shared/workspace.ts`'s `recordEdit`.
+ */
+export interface WorkspaceEdit {
+  kind: "edit";
   type: LabelType;
-  missingLanguages: string[];
-  /**
-   * Active, non-base languages whose value is byte-identical to the base-language
-   * (`en_US`, DECISIONS.md #41's existing assumption) value — a real possible failure
-   * mode (source pasted into the translation field instead of translating it), but not
-   * always wrong (short strings, numbers, brand names legitimately match across
-   * languages) — hence `Settings.flagIdenticalTranslations` gating whether this is
-   * surfaced at all. Computed alongside `missingLanguages`, same data, no new fetches.
-   */
-  identicalToSourceLanguages: string[];
+  apiName: string;
+  language: string;
+  /** The effective value the user saw before their FIRST edit of this key ("" when none existed). */
+  oldValue: string;
+  newValue: string;
+  /** Epoch ms of the LATEST save of this key. */
+  timestamp: number;
+}
+
+/**
+ * An element deliberately tracked from the inspector without editing it — the
+ * "Add to Workspace" action on the hover/inspector tooltip (PHASE 16 v2,
+ * `DECISIONS.md #66`). One pin per element (not per language); `snapshot` freezes
+ * every language value at capture time, which is what lets the Workspace later say
+ * "this changed since you captured it" without any extra API calls.
+ */
+export interface WorkspacePin {
+  kind: "pin";
+  type: LabelType;
+  apiName: string;
+  /** valuesByLang as they were at the moment of pinning. */
+  snapshot: Record<string, string>;
+  /** Epoch ms of the capture. */
+  timestamp: number;
+}
+
+/**
+ * Everything the Workspace tracks, persisted under `chrome.storage.local`'s
+ * `workspaceItems` key. (V1 stored bare `WorkspaceEdit` rows — no `kind` — under
+ * `workspaceEdits`; `shared/workspace.ts`'s `normalizeStoredWorkspace` migrates them.)
+ */
+export type WorkspaceItem = WorkspaceEdit | WorkspacePin;
+
+/** Content → background: toggle an element's Workspace pin (tooltip's "Add to Workspace"). The background snapshots the entry's current values from its own index — the authoritative copy — not from the page. */
+export interface ToggleWorkspacePinRequest {
+  type: "WORKSPACE_TOGGLE_PIN";
+  apiName: string;
+  labelType: LabelType;
+}
+
+export interface ToggleWorkspacePinResponse {
+  /** The pin state AFTER the toggle. */
+  pinned: boolean;
 }

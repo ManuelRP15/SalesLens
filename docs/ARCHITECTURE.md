@@ -38,6 +38,7 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 | `metadata-translations.ts` | Read-side orchestrator: seeds `FieldLabel`/`ObjectLabel`/`PicklistValue`/etc. from `describe-api.ts`'s standard translations, overlays `CustomObjectTranslation` zip content as customized overrides. |
 | `metadata-write.ts` | Write-side orchestrator (PHASE 6b, `DECISIONS.md #53`): `saveMetadataTranslation` — per-`LabelType` target resolution (which XML file/node, plus the lesson-#15 sibling-unlock members retrieve() needs), locate-or-insert, optimistic concurrency, deploy. The `saveCustomLabelTranslation`-shaped counterpart for every editable type except `CustomLabel`. |
 | `metadata-write.test.ts` | Unit tests for the preserveOrder patch/insert/fresh-document logic above — fixture XML strings, no live org needed. |
+| `workspace.ts` | PHASE 16's pure core (`DECISIONS.md #65`): `recordEdit` (the fold rule — first `oldValue` kept, latest `newValue` wins), `packageMembersForEdit` (mirrors `metadata-write.ts`'s per-type dependency sets), `buildPackageXml`, `summarizeWorkspace`. Chrome-free; unit-tested in `workspace.test.ts`. |
 | `describe-api.ts` | Partner API SOAP client (`describeSObjects` + `LocaleOptions`, `describeLayout` via REST): Salesforce's own standard/default translations, independent of any org customization. |
 | `platform-labels.ts` | Curated built-in catalog of standard Salesforce platform UI strings (buttons, tabs) in es/fr/nl_NL — legitimate ONLY because these are Salesforce's own translations, identical in every org (`DECISIONS.md #37`). Never add anything admin-authored here. |
 | `mock-data.ts` | Sample `LabelEntry[]` used when there's no real org session (dev/no-`sid` fallback). |
@@ -62,21 +63,22 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`), Translation Health computation (`missingLanguages` + `identicalToSourceLanguages`, `DECISIONS.md #58`). |
+| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`, `WORKSPACE_TOGGLE_PIN`), and the Workspace's two capture paths (PHASE 16, `DECISIONS.md #65`/`#66`): every successful `saveTranslation` folds a `WorkspaceEdit` into `chrome.storage.local.workspaceItems` (fold rule in `shared/workspace.ts`), and `WORKSPACE_TOGGLE_PIN` pins/unpins an element with a values snapshot taken from the in-memory index. Also persists `lastOrgOrigin` on every `LOAD_LABELS` so extension pages can build absolute Setup links. |
 
-### `src/popup/` and `src/health/` — extension UI surfaces
+### `src/popup/` and `src/workspace/` — extension UI surfaces
 
 | File | Responsibility |
 |---|---|
-| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (`ShortcutToggleRow` — Enabled/Disabled + conflict-checked key recorder for `inspectorHotkey`/`holdHotkey`, `DECISIONS.md #57`), Display settings (incl. `flagIdenticalTranslations`), refresh button, link to Translation Health. |
-| `health/Health.tsx` | Dedicated page (`chrome.tabs.create`): per-language Missing + Possibly-untranslated (identical-to-source) tables, computed by the background on every index refresh. |
-| `popup/main.tsx`, `health/main.tsx`, `*/index.html` | Standard React mount points — no logic. |
+| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (`ShortcutToggleRow` — Enabled/Disabled + conflict-checked key recorder for `inspectorHotkey`/`holdHotkey`, `DECISIONS.md #57`), Display settings (incl. `flagIdenticalTranslations`), refresh button, and the "Open Workspace" button with a live item count. |
+| `workspace/Workspace.tsx` | Dedicated page (PHASE 16 v2, `DECISIONS.md #66`): the product's memory — auto-captured edits + inspector pins, grouped by type, before→after comparator, change detection against `cachedEntries` ("changed since captured", with an honest unknown state), search + type chips + status tabs, Open-in-Setup links (`lastOrgOrigin` + `setupPath`), per-item remove, two-stage clear, package.xml + JSON export. Never invents rows (capture lives in the background); live-updates via `storage.onChanged`. |
+| `workspace/workspace.css` | The page's stylesheet — deliberately the same visual vocabulary as the audit panel (status rails, chips) and tooltip (type badges, language dots). |
+| `popup/main.tsx`, `workspace/main.tsx`, `*/index.html` | Standard React mount points — no logic. |
 
 ### Root config
 
 `manifest.config.ts` (permissions, host_permissions, entry points), `vite.config.ts`
 (build entries — anything opened via `chrome.tabs.create` rather than the manifest
-directly, like `health/index.html`, must be listed here too, see `DECISIONS.md #20`),
+directly, like `workspace/index.html`, must be listed here too, see `DECISIONS.md #20`),
 `tsconfig.json`, `package.json`.
 
 ### `dev-harness/` — real-browser harness for the content script (NOT shipped)
@@ -147,9 +149,10 @@ Background Service Worker
   ├─ LOAD_LABELS: page origin → API host → sid cookie → in parallel:
   │     • fetchAllTranslations (Tooling API): Custom Labels
   │     • fetchMetadataTranslationEntries (Metadata + Partner APIs): everything else
-  │   → merges into one LabelEntry[], rebuilds the reverse index, persists to storage,
-  │     recomputes Translation Health
+  │   → merges into one LabelEntry[], rebuilds the reverse index, persists to storage
   ├─ RESOLVE_TEXT / RESOLVE_TEXTS_BULK: reverse-index lookup → resolveText() → candidates
+  ├─ WORKSPACE_TOGGLE_PIN: pins/unpins an element in `workspaceItems`, snapshotting its
+  │     values from the in-memory index (PHASE 16 v2, `DECISIONS.md #66`)
   ├─ SAVE_TRANSLATION: live-value conflict check, then either PATCH/POST
   │     (saveCustomLabelTranslation) or retrieve→patch→deploy() (saveMetadataTranslation,
   │     PHASE 6b) depending on labelType → folds result back into the same in-memory
@@ -236,8 +239,11 @@ duplicate of that detail.
   RelatedList deferred, StandardButton/StandardTab permanently non-editable — see rule
   #8 and `DECISIONS.md #53`.
 - **Translation Mode** (PHASE 9) — whole-page inline translation chips.
-- **Translation Health** (PHASE 10) — dedicated page, org-wide missing-translation
-  report.
+- **Workspace** (PHASE 16, `DECISIONS.md #65`/`#66`) — the product's memory: automatic
+  capture of every saved edit + "+ Workspace" pins from the inspector, change detection
+  against the index, package.xml/JSON export. (The Translation Health page was removed
+  from the product in `#66`; its missing/identical signals live on in the tooltip,
+  Translation Mode, and the audit panel.)
 - **Inspection Mode + Always Hover** (hover activation modes, `DECISIONS.md #43`) — see
   also PHASE 17 (Keyboard-First) for planned extensions.
 - Metadata types resolved: Custom Labels, Field/Object/Picklist/RecordType labels

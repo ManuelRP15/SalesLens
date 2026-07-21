@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { Health } from "./Health";
+import { Workspace } from "./Workspace";
 
 const container = document.getElementById("root")!;
-createRoot(container).render(<Health />);
+createRoot(container).render(<Workspace />);

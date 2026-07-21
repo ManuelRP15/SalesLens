@@ -8,12 +8,12 @@ export default defineConfig({
   build: {
     rollupOptions: {
       // crxjs auto-detects HTML entries referenced by manifest fields it parses
-      // (action.default_popup, etc). src/health/index.html is only referenced via
+      // (action.default_popup, etc). src/workspace/index.html is only referenced via
       // web_accessible_resources, which makes crxjs copy the raw file but skips the
       // usual Vite HTML transform (script tag -> built asset). Declaring it here
-      // explicitly gets it processed the same way the popup is.
+      // explicitly gets it processed the same way the popup is (DECISIONS.md #20/#65).
       input: {
-        health: "src/health/index.html",
+        workspace: "src/workspace/index.html",
       },
     },
   },

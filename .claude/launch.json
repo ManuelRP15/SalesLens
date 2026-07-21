@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "harness"],
       "port": 5199
+    },
+    {
+      "name": "workspace-harness",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "harness:workspace"],
+      "port": 5200
     }
   ]
 }

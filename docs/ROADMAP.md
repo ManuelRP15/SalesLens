@@ -30,13 +30,13 @@ marked "done" before 2026-07-21 is off by default without checking.
 | 7 | Standard labels without Translation Workbench | ✅ done | — |
 | 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done (advanced types opt-in), Lens pending | — |
 | 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing; advanced-type badges opt-in); missing/identical-to-source chip signals shipped 2026-07-21 (DECISIONS.md #58) | rest of QA Mode refinement (longer-term Screen Flows) pending |
-| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); **QA Report v2 RETIRED 2026-07-21** (DECISIONS.md #64, archived at tag `archive/translation-health-v2`) | — |
+| 10 | Translation Health | ❌ **REMOVED from the product 2026-07-22** (DECISIONS.md #66; v2 already retired in #64, archived at tag `archive/translation-health-v2`). Missing/identical signals live on in tooltip/Translation Mode/audit panel. | — |
 | 11 | Language config UI + Quick Compare | 🟡 Quick Compare shipped 2026-07-21 (DECISIONS.md #59, closes PRODUCT.md MVP capability #2); language order/colors/icons/profiles still pending | — |
 | 12 | Advanced Metadata Inspector | ⬜ pending | — |
 | 13 | Smart Search | ⬜ pending | — |
 | 14 | Productivity Actions | 🟡 Copy API Name done; Copy SOQL/XML **removed** 2026-07-21 (DECISIONS.md #56 — kept the extension simple per direct product feedback); export pending | — |
 | 15 | Dependency Inspector | ⬜ pending | ⚠️ feasibility unconfirmed |
-| 16 | Workspace / Metadata Basket / package.xml Builder | ⬜ pending | **Muy Alta** |
+| 16 | Workspace / Metadata Basket / package.xml Builder | 🟢 v2 shipped 2026-07-22 (`DECISIONS.md #65`/`#66`): auto capture on save + inspector pins, change detection vs the index, product-consistent page (search/chips/tabs/Setup links), package.xml + JSON export, popup count | Safe Undo next; org audit info, sessions, JSON import deferred with reasons (see phase) |
 | 17 | Keyboard-First Experience | 🟡 Enter-to-edit shipped; save/cancel already worked; hold-vs-toggle hover redesign shipped 2026-07-21 (DECISIONS.md #56); shortcut settings UX simplified + mutual conflict prevention shipped 2026-07-21 (DECISIONS.md #57); arrow-key navigation still pending | **Muy Alta** |
 | 18 | Translation Audit & Guided Navigation ("Translate All" evolution, absorbs the old "Translation Navigator") | 🟡 v1 shipped 2026-07-21 (`#60`); first real-org bug round fixed same day (`#61`): sticky-header scroll correction, editor-closes-on-click root cause (Dynamic Hover parity), Complete-tab overflow, session-local translation scope toggle (All fields/Current only) | Duplicated filter designed but deferred (needs its own real-org check); Page Coverage stat line folded into the panel header instead of a separate feature |
 | 19 | Hover History & Favorites | ⬜ pending | Alta |
@@ -295,43 +295,23 @@ highest-rated idea in that review) — the first two concrete additions SHIPPED
 - Longer-term, extend Translation Mode beyond Lightning Record Pages to **Screen
   Flows**, which have their own translation surface the extension doesn't touch yet.
 
-### PHASE 10 — Translation Health (done, v1)
-Dedicated extension page, `src/health/index.html` (+ `main.tsx` + `Health.tsx`), opened
-via a popup button (`chrome.tabs.create(chrome.runtime.getURL(...))`) — the popup
-itself is too small for a real table. `web_accessible_resources` in
-`manifest.config.ts` is what makes `@crxjs/vite-plugin` treat this extra HTML file as
-a build entry; it's the standard crxjs v2 pattern for pages beyond the popup that get
-opened via `chrome.tabs.create` rather than referenced directly in the manifest.
-- Every time `setIndexFromRealData` runs, the background also computes
-  `TranslationHealthEntry[]` — for each `LabelEntry`, which of `settings.activeLanguages`
-  it has no value for — and persists it to `chrome.storage.local` (`translationHealth`).
-  Deliberately checked against the user's *active* languages, not the union of every
-  language seen across all entries: it's a more directly actionable question ("what's
-  missing among the languages I said I care about") than a broader consistency audit.
-- The health page reads that + `settings` from storage and renders one row per active
-  language (missing count + a coverage bar), expandable into the actual list of
-  `apiName (type)` missing that language.
-- ✅ **"Identical to source language" detection shipped 2026-07-21** (`DECISIONS.md
-  #58`, closes `PRODUCT.md`'s MVP capability #4): `TranslationHealthEntry` now also
-  carries `identicalToSourceLanguages`, shown as a "Possibly untranslated" column
-  (hidden when `Settings.flagIdenticalTranslations` is off) with the same expandable
-  per-language detail as Missing. Other consistency checks beyond missing/identical
-  (Duplicated, Broken, Terminology) are still open — see QA Report v2 below.
+### PHASE 10 — Translation Health — ❌ REMOVED FROM THE PRODUCT (2026-07-22, `DECISIONS.md #66`)
 
-**QA / Localization Report v2 — RETIRED 2026-07-21 (`DECISIONS.md #64`).** The planned
-extensions (Duplicated / Broken / Broken-references / Terminology-consistency detection,
-report export) are no longer active roadmap: Translation Audit (PHASE 18) became the
-product's working QA surface and serves the same user need in-context, and the epic had
-become a source of orchestration complexity out of proportion to its value. A completed
-Duplicated-detection implementation (pure module + 209-line test suite + a preview
-harness) is preserved at git tag `archive/translation-health-v2` — if any of this is
-revived, the likely shape is an **Audit filter** (see PHASE 18's deferred "Duplicated
-filter"), reusing that module, not a Health-page column.
-- ✅ **Architecture guidance followed**: "identical to source language" above and
-  PHASE 9's chip flagging are driven by the exact same `computeTranslationHealth()`
-  computation in `background/index.ts` (`identicalToSourceLanguages`), not two
-  separate implementations — the per-page chips and the org-wide report read the same
-  underlying signal.
+The dedicated Health page (v1: per-language Missing + Identical-to-source tables) was
+**removed entirely** — page, popup button, background computation, `translationHealth`
+storage, `TranslationHealthEntry` type — by explicit product decision: the in-context
+surfaces (the tooltip's Quick Compare, Translation Mode's missing/identical chips, and
+the Translate All audit panel's Missing/Identical filters) are where this capability
+actually gets used, and the product direction is **Inspect + Translate All +
+Workspace**, not a separate report page. This closes the retirement `#64` began (v2
+was archived then; v1's surface is gone now).
+
+**What survived, because it was never Health-specific:** the missing/identical
+detection signals (`Settings.flagIdenticalTranslations`, `BASE_LANGUAGE` comparison)
+live in the tooltip/Translation Mode/audit panel and are untouched. The archived v2
+work remains at git tag `archive/translation-health-v2` (Duplicated-detection module +
+tests) — if ever revived, the shape is an **Audit filter** (PHASE 18's deferred
+"Duplicated filter"), not a report page.
 
 ### PHASE 11 — Language configuration UI + Quick Compare
 Beyond the popup's language checkboxes: user-configurable language order, colors, and
@@ -416,6 +396,37 @@ until the feasibility spike above runs; don't commit to this list in the UI unti
 confirmed.
 
 ### PHASE 16 — Workspace, Metadata Basket & Automatic package.xml Builder
+**🟢 v2 shipped 2026-07-22 (`DECISIONS.md #66`; v1 same week, `#65`).** The Workspace is
+now integrated into the product's flow, not a side utility:
+- **Capture, two paths:** every successful save (v1, automatic) + **"+ Workspace" pins
+  from the inspector tooltip** (v2) — one affordance that serves BOTH discovery
+  workflows, since audit rows open the same inspector ("navigate = inspect", `#62`).
+  Pins snapshot every language value at capture time.
+- **Change awareness:** the page compares captured values against `cachedEntries` and
+  flags "changed since your edit / since you captured it" per language, with an honest
+  "not in the current index" unknown state and a freshness footer. No new API calls.
+- **The page speaks the product's visual language** (`workspace.css`): audit-panel
+  status rails (edited blue / pinned slate / changed amber), tooltip type badges +
+  language dots, search + typeLabel chips + status tabs (All/Edited/Pinned/Changed),
+  Open-in-Setup links (via `lastOrgOrigin` + `setupPath`), relative times, two-stage
+  clear. Popup button shows a live item count.
+
+**Deliberately deferred, with reasons (`#66`):**
+- **Safe Undo** — next in line; a write path (T3) wanting its own round with real-org
+  verification. Its prerequisites (original values + drift detection) now exist.
+- **"Last modified by" / org audit info** — investigated: reliably available ONLY for
+  Custom Labels (Tooling API `ExternalString.LastModifiedBy`); the deploy()-backed
+  types are not Tooling-queryable (`DECISIONS.md #6`) and the Metadata API exposes no
+  per-node audit. A partial, per-type-availability feature was judged noise for now;
+  if built, the UI must distinguish known/unknown/not-available per `#66`.
+- **Named/multiple sessions & session sharing** — evaluated and rejected for now (P2
+  radical simplicity): ONE rolling workspace + timestamps + "since <date>" + JSON
+  export/import covers the real need until evidence of multi-session demand appears.
+- **JSON import** (export ships), **bulk actions/multi-select**, **keyboard nav** on
+  the page — all deferred until a real usage pattern asks for them.
+
+Original phase spec kept below for those follow-ups.
+
 **Muy Alta priority.** Backlog ideas #2 ("Package.xml Builder Automático") and #3
 ("Workspace Persistente"), the separately pasted "Workspace (Sesión de Trabajo)"
 concept doc, and the chat-summarized "Metadata Basket" are the same feature described
