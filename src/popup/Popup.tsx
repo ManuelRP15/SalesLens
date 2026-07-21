@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { langAccent } from "../content/tooltip-constants";
 import { bareKeysConflict, pickAvailableBareKey } from "../shared/hotkeys";
+import { normalizeStoredWorkspace } from "../shared/workspace";
 import { DEFAULT_HOLD_HOTKEY, DEFAULT_INSPECTOR_HOTKEY, DEFAULT_TM_HOTKEY, type Settings, type TmPreset } from "../shared/types";
 
 // NOTE: no flag emoji anywhere — Chrome on Windows renders 🇪🇸 as the letters
@@ -207,11 +208,28 @@ export function Popup() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showTmSettings, setShowTmSettings] = useState(false);
+  // Live Workspace item count on the "Open Workspace" button — the popup is where the
+  // Workspace is reached from, so it says at a glance whether there's anything in it.
+  const [workspaceCount, setWorkspaceCount] = useState(0);
 
   useEffect(() => {
     chrome.runtime.sendMessage({ type: "GET_SETTINGS" }, (response: Settings) => {
       setSettings(response);
     });
+    const readCount = (itemsRaw: unknown, legacyRaw: unknown) =>
+      setWorkspaceCount(normalizeStoredWorkspace(itemsRaw, legacyRaw).length);
+    chrome.storage.local.get(["workspaceItems", "workspaceEdits"], (stored) =>
+      readCount(stored.workspaceItems, stored.workspaceEdits)
+    );
+    const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === "local" && (changes.workspaceItems || changes.workspaceEdits)) {
+        chrome.storage.local.get(["workspaceItems", "workspaceEdits"], (stored) =>
+          readCount(stored.workspaceItems, stored.workspaceEdits)
+        );
+      }
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
 
   function toggleLanguage(code: string) {
@@ -540,7 +558,7 @@ export function Popup() {
       </div>
 
       <button
-        onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("src/health/index.html") })}
+        onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("src/workspace/index.html") })}
         style={{
           marginTop: 10,
           width: "100%",
@@ -552,23 +570,7 @@ export function Popup() {
           cursor: "pointer",
         }}
       >
-        Open Translation Health
-      </button>
-
-      <button
-        onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("src/workspace/index.html") })}
-        style={{
-          marginTop: 6,
-          width: "100%",
-          padding: "6px 0",
-          fontSize: 13,
-          borderRadius: 4,
-          border: "1px solid #d8dde6",
-          background: "#fff",
-          cursor: "pointer",
-        }}
-      >
-        Open Workspace
+        Open Workspace{workspaceCount > 0 ? ` (${workspaceCount})` : ""}
       </button>
     </div>
   );

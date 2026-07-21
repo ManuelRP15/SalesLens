@@ -78,14 +78,37 @@ function candidatesFor(text: string): unknown[] {
   return hit ? [hit] : [];
 }
 
+/** Extra storage keys beyond `settings` — currently the Workspace items the content script reads pin state from (PHASE 16 v2). */
+const extraStore: Record<string, unknown> = { workspaceItems: [] };
+
+function notifyStorage(changes: Record<string, { newValue: unknown }>): void {
+  for (const l of storageListeners) l(changes, "local");
+}
+
 const chromeStub = {
   storage: {
     local: {
-      get: (_key: string, cb: (items: Record<string, unknown>) => void) => cb({ settings }),
+      get: (keys: string | string[], cb: (items: Record<string, unknown>) => void) => {
+        const wanted = Array.isArray(keys) ? keys : [keys];
+        const result: Record<string, unknown> = {};
+        for (const k of wanted) {
+          if (k === "settings") result.settings = settings;
+          else if (k in extraStore) result[k] = extraStore[k];
+        }
+        cb(result);
+      },
       set: (items: Record<string, unknown>) => {
-        const next = (items.settings ?? {}) as StubSettings;
-        Object.assign(settings, next);
-        for (const l of storageListeners) l({ settings: { newValue: { ...settings } } }, "local");
+        const changes: Record<string, { newValue: unknown }> = {};
+        if (items.settings) {
+          Object.assign(settings, items.settings as StubSettings);
+          changes.settings = { newValue: { ...settings } };
+        }
+        for (const [k, v] of Object.entries(items)) {
+          if (k === "settings") continue;
+          extraStore[k] = v;
+          changes[k] = { newValue: v };
+        }
+        notifyStorage(changes);
       },
     },
     onChanged: { addListener: (l: StorageListener) => storageListeners.push(l) },
@@ -93,7 +116,10 @@ const chromeStub = {
   runtime: {
     lastError: undefined as unknown,
     id: "harness",
-    sendMessage: (message: { type: string; text?: string; items?: { text: string }[] }, cb?: (r: unknown) => void) => {
+    sendMessage: (
+      message: { type: string; text?: string; items?: { text: string }[]; apiName?: string; labelType?: string },
+      cb?: (r: unknown) => void
+    ) => {
       if (!cb) return;
       // Async, like the real service worker round trip — timing bugs that only show up
       // with a real message delay are exactly what this harness is for.
@@ -102,7 +128,17 @@ const chromeStub = {
         else if (message.type === "RESOLVE_TEXTS_BULK")
           cb({ results: (message.items ?? []).map((i) => ({ candidates: candidatesFor(i.text) })) });
         else if (message.type === "SAVE_TRANSLATION") cb({ ok: true });
-        else cb(undefined);
+        else if (message.type === "WORKSPACE_TOGGLE_PIN") {
+          // Same toggle semantics as the real background (shared/workspace.ts's togglePin).
+          const items = extraStore.workspaceItems as Array<{ kind: string; type: string; apiName: string }>;
+          const without = items.filter((i) => !(i.kind === "pin" && i.type === message.labelType && i.apiName === message.apiName));
+          const pinned = without.length === items.length;
+          extraStore.workspaceItems = pinned
+            ? [...items, { kind: "pin", type: message.labelType, apiName: message.apiName, snapshot: {}, timestamp: Date.now() }]
+            : without;
+          notifyStorage({ workspaceItems: { newValue: extraStore.workspaceItems } });
+          cb({ pinned });
+        } else cb(undefined);
       }, 30);
     },
     onMessage: { addListener: () => {} },

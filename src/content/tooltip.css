@@ -165,6 +165,23 @@
   background: #dbe7fb;
 }
 
+/* "Add to Workspace" pin toggle (PHASE 16 v2) — same quiet chip shape as the Copy
+   button; the ON state adopts the product's green "complete/tracked" tone so a pinned
+   element reads as a settled fact, not a pending action. */
+.sti-pin-btn--on {
+  color: #1a7f4e;
+  background: #e8f5ee;
+}
+
+.sti-pin-btn--on:hover {
+  background: #d9eee2;
+}
+
+.sti-pin-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .sti-copy-icon-btn {
   font-family: inherit;
   font-size: 11px;

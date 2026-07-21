@@ -3,8 +3,8 @@ import { MOCK_LABEL_ENTRIES } from "../shared/mock-data";
 import { fetchAllTranslations, saveCustomLabelTranslation, toApiHost } from "../shared/salesforce-api";
 import { fetchMetadataTranslationEntries } from "../shared/metadata-translations";
 import { saveMetadataTranslation } from "../shared/metadata-write";
-import { recordEdit } from "../shared/workspace";
-import { BASE_LANGUAGE, isEditableEntry, isInSimpleScope } from "../shared/types";
+import { normalizeStoredWorkspace, recordEdit, togglePin } from "../shared/workspace";
+import { isEditableEntry, isInSimpleScope } from "../shared/types";
 import type {
   ResolveTextRequest,
   ResolveTextResponse,
@@ -15,8 +15,10 @@ import type {
   SaveTranslationResponse,
   Settings,
   LabelEntry,
-  TranslationHealthEntry,
+  ToggleWorkspacePinRequest,
+  ToggleWorkspacePinResponse,
   WorkspaceEdit,
+  WorkspaceItem,
 } from "../shared/types";
 
 console.log("[STI] ### background loaded - PHASE 4 version ###");
@@ -97,32 +99,6 @@ async function getSessionId(apiHost: string): Promise<string | null> {
 }
 
 /**
- * Which of the user's active languages each entry has no translated value for, and
- * which merely repeat the base-language value (PRODUCT.md MVP capability #4's
- * "identical to the source language" check — a soft signal, not scoped by
- * `flagIdenticalTranslations` here since that's a display-time concern for whoever
- * reads this data; both surfaces (Translation Mode, Translation Health) apply the
- * setting themselves). Scoped by simpleMode (DECISIONS.md #56) — same "what's out of
- * scope stays invisible everywhere" rule as hover/Translation Mode, not just the health
- * report's own separate filter.
- */
-function computeTranslationHealth(entries: LabelEntry[], languages: string[], simpleMode: boolean): TranslationHealthEntry[] {
-  return entries
-    .filter((entry) => !simpleMode || isInSimpleScope(entry.type))
-    .map((entry) => {
-      const baseValue = entry.valuesByLang[BASE_LANGUAGE];
-      return {
-        apiName: entry.apiName,
-        type: entry.type,
-        missingLanguages: languages.filter((lang) => !entry.valuesByLang[lang]),
-        identicalToSourceLanguages: baseValue
-          ? languages.filter((lang) => lang !== BASE_LANGUAGE && entry.valuesByLang[lang] === baseValue)
-          : [],
-      };
-    });
-}
-
-/**
  * Applies `settings.simpleMode` to a resolveText() result — the ONE choke point both
  * hover (RESOLVE_TEXT) and Translation Mode (RESOLVE_TEXTS_BULK) go through, so
  * scoping stays consistent between them without touching resolveText's own
@@ -146,12 +122,13 @@ async function setIndexFromRealData(entries: LabelEntry[]): Promise<void> {
   console.log("[STI] index rebuilt:", byType);
 
   const settings = await getSettings();
-  const translationHealth = computeTranslationHealth(entries, settings.activeLanguages, settings.simpleMode);
   await chrome.storage.local.set({
     settings: { ...settings, lastIndexRefresh: Date.now() } satisfies Settings,
     cachedEntries: entries,
-    translationHealth,
   });
+  // Translation Health was removed from the product (DECISIONS.md #66) — clear the
+  // key its page used to read so retired data doesn't linger in users' storage.
+  await chrome.storage.local.remove("translationHealth");
 }
 
 async function loadLabels(pageOrigin: string, pageObjectApiName: string | null | undefined): Promise<void> {
@@ -161,6 +138,9 @@ async function loadLabels(pageOrigin: string, pageObjectApiName: string | null |
     console.warn(`[STI] no 'sid' cookie for ${apiHost}; using sample data.`);
     return;
   }
+  // The org origin the index was loaded from — extension pages (the Workspace) need it
+  // to build absolute Setup links, since THEIR window.location is chrome-extension://.
+  await chrome.storage.local.set({ lastOrgOrigin: pageOrigin });
   try {
     const settings = await getSettings();
     const [customLabelEntries, metadataEntries] = await Promise.all([
@@ -178,8 +158,8 @@ async function loadLabels(pageOrigin: string, pageObjectApiName: string | null |
 /**
  * PHASE 6/6b: persists one language's edited value for any editable type (see
  * isEditableEntry) and folds the change back into the live index — same
- * setIndexFromRealData path a full refresh uses, so the reverse index, the persisted
- * cache, and Translation Health all pick up the edit immediately, with no separate
+ * setIndexFromRealData path a full refresh uses, so the reverse index and the
+ * persisted cache both pick up the edit immediately, with no separate
  * "apply this one edit" logic to keep in sync. Two write mechanisms share this one
  * function: CustomLabel goes through the Tooling API (saveCustomLabelTranslation,
  * fast, synchronous PATCH/POST); everything else goes through a Metadata API deploy()
@@ -245,6 +225,7 @@ async function saveTranslation(req: SaveTranslationRequest): Promise<SaveTransla
     // write already happened), so failures only log.
     try {
       await recordWorkspaceEdit({
+        kind: "edit",
         type: req.labelType,
         apiName: req.apiName,
         language: req.language,
@@ -263,11 +244,44 @@ async function saveTranslation(req: SaveTranslationRequest): Promise<SaveTransla
   }
 }
 
+/**
+ * PHASE 16: the persisted Workspace, read with v1→v2 migration applied
+ * (`workspaceEdits` bare rows → `workspaceItems` with `kind`, see
+ * shared/workspace.ts's normalizeStoredWorkspace).
+ */
+async function loadWorkspaceItems(): Promise<WorkspaceItem[]> {
+  const stored = await chrome.storage.local.get(["workspaceItems", "workspaceEdits"]);
+  return normalizeStoredWorkspace(stored.workspaceItems, stored.workspaceEdits);
+}
+
+async function storeWorkspaceItems(items: WorkspaceItem[]): Promise<void> {
+  await chrome.storage.local.set({ workspaceItems: items });
+  // The legacy v1 key is folded into workspaceItems on every read — remove it so the
+  // migration happens exactly once instead of duplicating rows on the next load.
+  await chrome.storage.local.remove("workspaceEdits");
+}
+
 /** PHASE 16: folds one captured edit into the persisted Workspace (fold rule: shared/workspace.ts's recordEdit). */
 async function recordWorkspaceEdit(edit: WorkspaceEdit): Promise<void> {
-  const stored = await chrome.storage.local.get("workspaceEdits");
-  const edits = (stored.workspaceEdits as WorkspaceEdit[] | undefined) ?? [];
-  await chrome.storage.local.set({ workspaceEdits: recordEdit(edits, edit) });
+  await storeWorkspaceItems(recordEdit(await loadWorkspaceItems(), edit));
+}
+
+/**
+ * PHASE 16 v2 (DECISIONS.md #66): the tooltip's "Add to Workspace" — pins an element,
+ * snapshotting its values from the background's OWN index (the authoritative copy the
+ * tooltip's display came from), so drift detection later compares like with like.
+ */
+async function toggleWorkspacePin(req: ToggleWorkspacePinRequest): Promise<ToggleWorkspacePinResponse> {
+  const entry = allEntries.find((e) => e.type === req.labelType && e.apiName === req.apiName);
+  const result = togglePin(await loadWorkspaceItems(), {
+    kind: "pin",
+    type: req.labelType,
+    apiName: req.apiName,
+    snapshot: { ...(entry?.valuesByLang ?? {}) },
+    timestamp: Date.now(),
+  });
+  await storeWorkspaceItems(result.items);
+  return { pinned: result.pinned };
 }
 
 type IncomingMessage =
@@ -275,6 +289,7 @@ type IncomingMessage =
   | ResolveTextsBulkRequest
   | GetSettingsRequest
   | SaveTranslationRequest
+  | ToggleWorkspacePinRequest
   | { type: "LOAD_LABELS"; origin: string; pageObjectApiName?: string | null };
 
 chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendResponse) => {
@@ -313,6 +328,16 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
 
   if (message.type === "SAVE_TRANSLATION") {
     void saveTranslation(message).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "WORKSPACE_TOGGLE_PIN") {
+    void toggleWorkspacePin(message)
+      .then(sendResponse)
+      .catch((err) => {
+        console.warn("[STI] workspace pin toggle failed:", err);
+        sendResponse({ pinned: false } satisfies ToggleWorkspacePinResponse);
+      });
     return true;
   }
 

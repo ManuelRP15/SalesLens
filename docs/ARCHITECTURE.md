@@ -63,22 +63,22 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`), Translation Health computation (`missingLanguages` + `identicalToSourceLanguages`, `DECISIONS.md #58`), and Workspace capture — every successful `saveTranslation` folds a `WorkspaceEdit` into `chrome.storage.local.workspaceEdits` (PHASE 16, `DECISIONS.md #65`; fold rule in `shared/workspace.ts`). |
+| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`, `WORKSPACE_TOGGLE_PIN`), and the Workspace's two capture paths (PHASE 16, `DECISIONS.md #65`/`#66`): every successful `saveTranslation` folds a `WorkspaceEdit` into `chrome.storage.local.workspaceItems` (fold rule in `shared/workspace.ts`), and `WORKSPACE_TOGGLE_PIN` pins/unpins an element with a values snapshot taken from the in-memory index. Also persists `lastOrgOrigin` on every `LOAD_LABELS` so extension pages can build absolute Setup links. |
 
-### `src/popup/`, `src/health/`, `src/workspace/` — extension UI surfaces
+### `src/popup/` and `src/workspace/` — extension UI surfaces
 
 | File | Responsibility |
 |---|---|
-| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (`ShortcutToggleRow` — Enabled/Disabled + conflict-checked key recorder for `inspectorHotkey`/`holdHotkey`, `DECISIONS.md #57`), Display settings (incl. `flagIdenticalTranslations`), refresh button, links to Translation Health and Workspace. |
-| `health/Health.tsx` | Dedicated page (`chrome.tabs.create`): per-language Missing + Possibly-untranslated (identical-to-source) tables, computed by the background on every index refresh. |
-| `workspace/Workspace.tsx` | Dedicated page (PHASE 16, `DECISIONS.md #65`): the automatically captured edit record — grouped by type, before→after comparator, per-item remove, two-stage clear, package.xml + JSON export. Reads/writes ONLY `workspaceEdits` from storage; never invents rows (capture lives in the background). |
-| `popup/main.tsx`, `health/main.tsx`, `workspace/main.tsx`, `*/index.html` | Standard React mount points — no logic. |
+| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (`ShortcutToggleRow` — Enabled/Disabled + conflict-checked key recorder for `inspectorHotkey`/`holdHotkey`, `DECISIONS.md #57`), Display settings (incl. `flagIdenticalTranslations`), refresh button, and the "Open Workspace" button with a live item count. |
+| `workspace/Workspace.tsx` | Dedicated page (PHASE 16 v2, `DECISIONS.md #66`): the product's memory — auto-captured edits + inspector pins, grouped by type, before→after comparator, change detection against `cachedEntries` ("changed since captured", with an honest unknown state), search + type chips + status tabs, Open-in-Setup links (`lastOrgOrigin` + `setupPath`), per-item remove, two-stage clear, package.xml + JSON export. Never invents rows (capture lives in the background); live-updates via `storage.onChanged`. |
+| `workspace/workspace.css` | The page's stylesheet — deliberately the same visual vocabulary as the audit panel (status rails, chips) and tooltip (type badges, language dots). |
+| `popup/main.tsx`, `workspace/main.tsx`, `*/index.html` | Standard React mount points — no logic. |
 
 ### Root config
 
 `manifest.config.ts` (permissions, host_permissions, entry points), `vite.config.ts`
 (build entries — anything opened via `chrome.tabs.create` rather than the manifest
-directly, like `health/index.html`, must be listed here too, see `DECISIONS.md #20`),
+directly, like `workspace/index.html`, must be listed here too, see `DECISIONS.md #20`),
 `tsconfig.json`, `package.json`.
 
 ### `dev-harness/` — real-browser harness for the content script (NOT shipped)
@@ -149,9 +149,10 @@ Background Service Worker
   ├─ LOAD_LABELS: page origin → API host → sid cookie → in parallel:
   │     • fetchAllTranslations (Tooling API): Custom Labels
   │     • fetchMetadataTranslationEntries (Metadata + Partner APIs): everything else
-  │   → merges into one LabelEntry[], rebuilds the reverse index, persists to storage,
-  │     recomputes Translation Health
+  │   → merges into one LabelEntry[], rebuilds the reverse index, persists to storage
   ├─ RESOLVE_TEXT / RESOLVE_TEXTS_BULK: reverse-index lookup → resolveText() → candidates
+  ├─ WORKSPACE_TOGGLE_PIN: pins/unpins an element in `workspaceItems`, snapshotting its
+  │     values from the in-memory index (PHASE 16 v2, `DECISIONS.md #66`)
   ├─ SAVE_TRANSLATION: live-value conflict check, then either PATCH/POST
   │     (saveCustomLabelTranslation) or retrieve→patch→deploy() (saveMetadataTranslation,
   │     PHASE 6b) depending on labelType → folds result back into the same in-memory
@@ -238,8 +239,11 @@ duplicate of that detail.
   RelatedList deferred, StandardButton/StandardTab permanently non-editable — see rule
   #8 and `DECISIONS.md #53`.
 - **Translation Mode** (PHASE 9) — whole-page inline translation chips.
-- **Translation Health** (PHASE 10) — dedicated page, org-wide missing-translation
-  report.
+- **Workspace** (PHASE 16, `DECISIONS.md #65`/`#66`) — the product's memory: automatic
+  capture of every saved edit + "+ Workspace" pins from the inspector, change detection
+  against the index, package.xml/JSON export. (The Translation Health page was removed
+  from the product in `#66`; its missing/identical signals live on in the tooltip,
+  Translation Mode, and the audit panel.)
 - **Inspection Mode + Always Hover** (hover activation modes, `DECISIONS.md #43`) — see
   also PHASE 17 (Keyboard-First) for planned extensions.
 - Metadata types resolved: Custom Labels, Field/Object/Picklist/RecordType labels

@@ -10,7 +10,7 @@ interface TooltipProps {
   /** Always 0 or 1 entries — see resolveText in index-builder.ts; this project never shows a "N possible origins" list. */
   candidates: LabelEntry[];
   activeLanguages: string[];
-  /** Mark a value identical to the base-language value with a small "≈" hint — mirrors Translation Mode/Health's own signal (`Settings.flagIdenticalTranslations`), so the same soft warning reads consistently everywhere translations are shown. Defaults to on (matches the setting's own default) so callers that don't thread it through yet degrade to the common case rather than silently losing the signal. */
+  /** Mark a value identical to the base-language value with a small "≈" hint — mirrors Translation Mode's own signal (`Settings.flagIdenticalTranslations`), so the same soft warning reads consistently everywhere translations are shown. Defaults to on (matches the setting's own default) so callers that don't thread it through yet degrade to the common case rather than silently losing the signal. */
   flagIdentical?: boolean;
   onSaveTranslation?: (
     entry: LabelEntry,
@@ -70,6 +70,14 @@ interface TooltipProps {
    * making it chase an element would change a behaviour that already works.
    */
   anchorEl?: Element;
+  /**
+   * PHASE 16 v2 (`DECISIONS.md #66`): `"type apiName"` keys of elements currently
+   * pinned to the Workspace — read once per summon; a toggle's own result then
+   * overrides locally, so the button never waits on a storage round trip to flip.
+   */
+  workspacePinnedKeys?: ReadonlySet<string>;
+  /** Toggles the entry's Workspace pin via the background; resolves to the state AFTER the toggle. Absent (e.g. in a context with no background) = no pin affordance shown. */
+  onToggleWorkspacePin?: (entry: LabelEntry) => Promise<boolean>;
 }
 
 /** Copies to the clipboard, falling back to a hidden textarea if the Clipboard API is unavailable/blocked. */
@@ -235,6 +243,48 @@ function TranslationEditor({ initialValue, status, errorMessage, onSave, onCance
   );
 }
 
+/**
+ * The tooltip's "Add to Workspace" toggle (PHASE 16 v2, `DECISIONS.md #66`) — the ONE
+ * affordance that connects both discovery workflows to the Workspace: the hover path
+ * shows it directly, and Translate All reaches it because clicking an audit row opens
+ * this same inspector ("navigate = inspect", #62). Same local-flip-then-confirm
+ * pattern as the Copy buttons: the label updates from the toggle's own response, not
+ * from a storage subscription.
+ */
+function WorkspacePinButton({
+  entry,
+  initialPinned,
+  onToggle,
+}: {
+  entry: LabelEntry;
+  initialPinned: boolean;
+  onToggle: NonNullable<TooltipProps["onToggleWorkspacePin"]>;
+}) {
+  const [pinned, setPinned] = useState(initialPinned);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <button
+      type="button"
+      className={`sti-copy-btn sti-pin-btn${pinned ? " sti-pin-btn--on" : ""}`}
+      title={
+        pinned
+          ? "Remove from Workspace"
+          : "Add to Workspace — track this element and its current values"
+      }
+      disabled={busy}
+      onClick={async (e) => {
+        e.stopPropagation();
+        setBusy(true);
+        setPinned(await onToggle(entry));
+        setBusy(false);
+      }}
+    >
+      {pinned ? "✓ Workspace" : "+ Workspace"}
+    </button>
+  );
+}
+
 function CandidateBlock({
   entry,
   activeLanguages,
@@ -244,6 +294,8 @@ function CandidateBlock({
   autoEditLanguage,
   editTrigger,
   cancelTrigger,
+  workspacePinnedKeys,
+  onToggleWorkspacePin,
 }: {
   entry: LabelEntry;
   activeLanguages: string[];
@@ -253,6 +305,8 @@ function CandidateBlock({
   autoEditLanguage?: string;
   editTrigger?: number;
   cancelTrigger?: number;
+  workspacePinnedKeys?: ReadonlySet<string>;
+  onToggleWorkspacePin?: TooltipProps["onToggleWorkspacePin"];
 }) {
   const colors = TYPE_COLORS[entry.type];
   const editable = isEditableEntry(entry);
@@ -302,8 +356,8 @@ function CandidateBlock({
 
   // Every active language gets a row, present or not (Quick Compare, DECISIONS.md
   // #59) — PHASE 4's original "only show languages that already have a value"
-  // behavior for non-editable types silently hid the exact gap Translation Health
-  // and Translation Mode's own "missing" chips (#58) now surface elsewhere, which
+  // behavior for non-editable types silently hid the exact gap that Translation
+  // Mode's own "missing" chips (#58) now surface elsewhere, which
   // made the hover tooltip — the PRIMARY inspection surface — the one place still
   // pretending nothing was missing. Editable types already showed every active
   // language (a missing one is directly actionable, one click away); non-editable
@@ -408,6 +462,13 @@ function CandidateBlock({
         {entry.dataType && <span className="sti-field-type">{entry.dataType}</span>}
         <code className="sti-tooltip__apiname" title={entry.apiName}>{displayApiName(entry)}</code>
         <CopyButton value={entry.apiName} />
+        {onToggleWorkspacePin && (
+          <WorkspacePinButton
+            entry={entry}
+            initialPinned={workspacePinnedKeys?.has(`${entry.type} ${entry.apiName}`) ?? false}
+            onToggle={onToggleWorkspacePin}
+          />
+        )}
       </div>
       {conflictNotice && <div className="sti-conflict-notice">{conflictNotice}</div>}
       {langCodes.length > 0 ? (
@@ -418,7 +479,7 @@ function CandidateBlock({
             // A value that matches the base language is only worth flagging for a
             // language that ISN'T the base itself, and only once there's an actual
             // base value to compare against (some entries have none in the active
-            // set at all) — same computation Translation Mode/Health already apply.
+            // set at all) — same computation Translation Mode already applies.
             const identical =
               flagIdentical && !missing && lang !== BASE_LANGUAGE && baseValue !== undefined && value === baseValue;
             const isEditingThis = editingLang === lang;
@@ -477,7 +538,7 @@ function CandidateBlock({
 /** Real form fields inside the tooltip — the only descendants allowed to take focus away from an open editor on mousedown. See `Tooltip`'s `handleMouseDown`. */
 const FOCUSABLE_FIELD_SELECTOR = "textarea, input, select, [contenteditable='true']";
 
-export function Tooltip({ text, x, y, candidates, activeLanguages, flagIdentical, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage, editTrigger, cancelTrigger, anchorEl }: TooltipProps) {
+export function Tooltip({ text, x, y, candidates, activeLanguages, flagIdentical, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage, editTrigger, cancelTrigger, anchorEl, workspacePinnedKeys, onToggleWorkspacePin }: TooltipProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ left: x + 12, top: y + 16 });
   /** The point the tooltip is currently laid out from. Starts at the summoning (x, y) and, for an anchored tooltip, is re-derived from the anchor's live rect on scroll. */
@@ -626,6 +687,8 @@ export function Tooltip({ text, x, y, candidates, activeLanguages, flagIdentical
           autoEditLanguage={autoEditLanguage}
           editTrigger={editTrigger}
           cancelTrigger={cancelTrigger}
+          workspacePinnedKeys={workspacePinnedKeys}
+          onToggleWorkspacePin={onToggleWorkspacePin}
         />
       ))}
     </div>

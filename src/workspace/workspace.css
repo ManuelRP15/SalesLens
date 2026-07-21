@@ -1,0 +1,438 @@
+/* Workspace page (PHASE 16 v2, DECISIONS.md #66).
+   Deliberately speaks the SAME visual language as the in-page surfaces: the audit
+   panel's status rails and chip filters, the tooltip's type badges and language dots.
+   Color vocabulary (shared with audit-panel.css / tooltip-constants.ts):
+   brand blue #0176d3 · edited rail #0176d3 · changed-externally rail/tone #b8860b ·
+   pinned rail #94a3b8 · ok green #1a7f4e · danger #ba0517 · ink #16325c ·
+   muted #706e6b · borders #d8dde6 / #eef1f6. */
+
+.ws-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+  color: #16325c;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.ws-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ws-header h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.ws-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #706e6b;
+}
+
+.ws-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ws-btn {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid #d8dde6;
+  background: #fff;
+  color: #16325c;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ws-btn:hover {
+  background: #f4f6f9;
+}
+
+.ws-btn--primary {
+  background: #0176d3;
+  border-color: #0176d3;
+  color: #fff;
+  font-weight: 600;
+}
+
+.ws-btn--primary:hover {
+  background: #0765ac;
+}
+
+.ws-btn--danger {
+  color: #ba0517;
+}
+
+.ws-btn--danger:hover {
+  background: #fdf2f3;
+}
+
+.ws-btn--danger-armed,
+.ws-btn--danger-armed:hover {
+  background: #ba0517;
+  border-color: #ba0517;
+  color: #fff;
+}
+
+/* ── Summary strip ──────────────────────────────────────────────────────── */
+
+.ws-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: #706e6b;
+}
+
+.ws-summary strong {
+  color: #16325c;
+  font-weight: 600;
+}
+
+.ws-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.ws-lang__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.ws-changed-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #7a5a08;
+  background: #fdf4dc;
+  border: 1px solid #f0dfae;
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+/* ── Toolbar: search + type chips + status tabs ─────────────────────────── */
+
+.ws-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #eef1f6;
+}
+
+.ws-search {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid #d8dde6;
+  border-radius: 6px;
+  min-width: 220px;
+  color: #16325c;
+  background: #fff;
+}
+
+.ws-search:focus {
+  outline: 2px solid #0176d3;
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+/* Type chips — same idea as the audit panel's typeLabel() chips (#63): you filter by
+   the exact name the rows' own badges show; selected adopts that type's badge colors
+   (set inline). */
+.ws-chip {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #d8dde6;
+  background: #fff;
+  color: #706e6b;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ws-chip:hover {
+  background: #f4f6f9;
+}
+
+.ws-tabs {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  background: #f4f6f9;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.ws-tab {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #706e6b;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ws-tab--active {
+  background: #fff;
+  color: #16325c;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(22, 50, 92, 0.12);
+}
+
+.ws-tab__count {
+  color: #9aa0a6;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.ws-tab--changed.ws-tab--active {
+  color: #7a5a08;
+}
+
+/* ── Groups + rows ──────────────────────────────────────────────────────── */
+
+.ws-group {
+  margin-top: 22px;
+}
+
+.ws-group__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ws-badge {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.ws-group__count {
+  font-size: 12px;
+  color: #706e6b;
+}
+
+.ws-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+/* Status rail on the left edge — the audit panel's own convention:
+   edited = brand blue, pinned = quiet slate, changed-externally = amber (drift wins,
+   it's the state that needs the user's attention). */
+.ws-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 9px 12px 9px 14px;
+  background: #fff;
+  border: 1px solid #eef1f6;
+  border-left: 3px solid #0176d3;
+  border-radius: 6px;
+}
+
+.ws-row--pin {
+  border-left-color: #94a3b8;
+}
+
+.ws-row--changed {
+  border-left-color: #b8860b;
+  background: #fffdf7;
+}
+
+.ws-row__main {
+  min-width: 0;
+  flex: 1;
+}
+
+.ws-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ws-row__api {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  color: #16325c;
+}
+
+.ws-kind {
+  font-size: 11px;
+  color: #706e6b;
+  white-space: nowrap;
+}
+
+.ws-icon-btn {
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: #1a56db;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.ws-icon-btn:hover {
+  background: #eef3fd;
+}
+
+.ws-setup-link {
+  font-size: 11px;
+  color: #1a56db;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ws-setup-link:hover {
+  text-decoration: underline;
+}
+
+.ws-values {
+  margin-top: 4px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.ws-values__old {
+  color: #706e6b;
+  text-decoration: line-through;
+}
+
+.ws-values__old--kept {
+  text-decoration: none;
+}
+
+.ws-values__arrow {
+  margin: 0 6px;
+  color: #9aa0a6;
+}
+
+.ws-values__new {
+  font-weight: 600;
+}
+
+.ws-values__empty {
+  color: #9aa0a6;
+  font-style: italic;
+}
+
+.ws-values__note {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #9aa0a6;
+}
+
+/* The "changed since you captured it" detail — an inline warning line, not a modal:
+   visible exactly when true, silent otherwise. */
+.ws-drift {
+  margin-top: 5px;
+  font-size: 12px;
+  color: #7a5a08;
+  background: #fdf4dc;
+  border-radius: 4px;
+  padding: 4px 8px;
+  overflow-wrap: anywhere;
+}
+
+.ws-drift__lang {
+  font-weight: 600;
+}
+
+.ws-unknown {
+  margin-top: 5px;
+  font-size: 11px;
+  color: #9aa0a6;
+  font-style: italic;
+}
+
+.ws-row__side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ws-time {
+  font-size: 11px;
+  color: #9aa0a6;
+  white-space: nowrap;
+}
+
+.ws-remove {
+  font-family: inherit;
+  font-size: 12px;
+  color: #706e6b;
+  background: #fff;
+  border: 1px solid #d8dde6;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.ws-remove:hover {
+  color: #ba0517;
+  border-color: #ba0517;
+}
+
+/* ── Empty / footer states ──────────────────────────────────────────────── */
+
+.ws-empty {
+  margin-top: 26px;
+  padding: 34px 24px;
+  border: 1px dashed #d8dde6;
+  border-radius: 8px;
+  color: #706e6b;
+  font-size: 13px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.ws-empty strong {
+  color: #16325c;
+}
+
+.ws-no-match {
+  margin-top: 22px;
+  color: #706e6b;
+  font-size: 13px;
+  text-align: center;
+}
+
+.ws-freshness {
+  margin-top: 26px;
+  font-size: 11px;
+  color: #9aa0a6;
+}

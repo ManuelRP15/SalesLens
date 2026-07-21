@@ -7,7 +7,16 @@ import { AuditPanel, filterAuditEntries, type AuditFilter } from "./AuditPanel";
 import auditPanelCss from "./audit-panel.css?inline";
 import { normalizeBareKey } from "../shared/hotkeys";
 import { resolveEscape, resolveNavKey, resolveOutsideClick, type InteractionSnapshot, type NavAction } from "./interaction";
-import type { LabelEntry, ResolveTextResponse, SaveTranslationRequest, SaveTranslationResponse, Settings } from "../shared/types";
+import { normalizeStoredWorkspace, pinnedKeys } from "../shared/workspace";
+import type {
+  LabelEntry,
+  ResolveTextResponse,
+  SaveTranslationRequest,
+  SaveTranslationResponse,
+  Settings,
+  ToggleWorkspacePinRequest,
+  ToggleWorkspacePinResponse,
+} from "../shared/types";
 
 function tmStyleFromSettings(s: Settings | undefined): TmStyle {
   return {
@@ -829,8 +838,35 @@ chrome.storage.local.get("settings", (stored) => {
   if (s?.translationModeEnabled) applyTranslationModeSetting(true);
 });
 
+/**
+ * PHASE 16 v2 (`DECISIONS.md #66`): which elements are currently pinned to the
+ * Workspace, so the tooltip can render "In Workspace" instead of "Add". Keys are
+ * `"type apiName"` (shared/workspace.ts's pinnedKeys). Kept fresh by the storage
+ * listener below; the toggle itself goes through the background (one writer for the
+ * capture path), and each open tooltip additionally keeps its own local override so
+ * the button flips instantly without waiting for the round trip.
+ */
+let workspacePinnedKeySet: ReadonlySet<string> = new Set();
+
+chrome.storage.local.get(["workspaceItems", "workspaceEdits"], (stored) => {
+  workspacePinnedKeySet = pinnedKeys(normalizeStoredWorkspace(stored.workspaceItems, stored.workspaceEdits));
+});
+
+function toggleWorkspacePin(entry: LabelEntry): Promise<boolean> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: "WORKSPACE_TOGGLE_PIN", apiName: entry.apiName, labelType: entry.type } satisfies ToggleWorkspacePinRequest,
+      (response: ToggleWorkspacePinResponse | undefined) => resolve(response?.pinned ?? false)
+    );
+  });
+}
+
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes.settings) return;
+  if (area !== "local") return;
+  if (changes.workspaceItems) {
+    workspacePinnedKeySet = pinnedKeys(normalizeStoredWorkspace(changes.workspaceItems.newValue, undefined));
+  }
+  if (!changes.settings) return;
   const s = changes.settings.newValue as Settings | undefined;
   isEnabled = s?.enabled ?? false;
   activeLanguages = s?.activeLanguages ?? [];
@@ -1053,6 +1089,8 @@ function tmTooltipElement(
       anchorEl={anchorEl}
       cancelTrigger={cancelTriggerCounter}
       onSaveTranslation={saveTranslation}
+      workspacePinnedKeys={workspacePinnedKeySet}
+      onToggleWorkspacePin={toggleWorkspacePin}
       onEditingActiveChange={(active) => {
         isEditingActive = active;
         if (!active) reconcileAfterEdit();
@@ -1084,6 +1122,8 @@ function showTooltip(text: string, x: number, y: number, response: ResolveTextRe
       activeLanguages={activeLanguages}
       flagIdentical={tmStyle.flagIdentical}
       onSaveTranslation={saveTranslation}
+      workspacePinnedKeys={workspacePinnedKeySet}
+      onToggleWorkspacePin={toggleWorkspacePin}
       onEditingActiveChange={(active) => {
         isEditingActive = active;
         if (!active) reconcileAfterEdit();
