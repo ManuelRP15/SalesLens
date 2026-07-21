@@ -49,12 +49,13 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 | File | Responsibility |
 |---|---|
 | `index.tsx` | The hover engine (mousemove-driven, Inspection Mode / Always Hover, tooltip ownership zone — `DECISIONS.md #43`), mounts the tooltip AND the audit panel (two independent React roots sharing one closed shadow host, `#60`), wires Translation Mode on/off, `SAVE_TRANSLATION` messaging (incl. the save-triggered Translation Mode rescan, `#60`), the guided-navigation highlight overlay + sticky-header-aware scroll correction (`ensureVisibleAboveObstruction`/`findScrollableAncestor`/`measureTopObstruction`, `#61`). |
-| `dom-utils.ts` | `deepElementFromPoint`/`extractOwnText` (hover), `resolveFieldContext`/`resolveSurfaceContext` (DOM-structure disambiguation hints), `collectTranslatableTargets` (Translation Mode's full-tree scan), `parentAcrossShadow` (shadow-piercing ancestor walk, exported for `#61`'s scroll-correction reuse). |
-| `Tooltip.tsx` | The tooltip React component — display (Quick Compare: every active language shown, missing/identical-to-source marked, `#59`), inline Custom Label editor, Copy buttons, reports its own rect via `onRectChange` for the hover-ownership zone. |
+| `interaction.ts` | **The interaction priority model** (`#63`) — pure functions deciding which system owns a click or a key (`resolveOutsideClick`/`resolveEscape`/`resolveNavKey`), over a flat snapshot `index.tsx` builds. No DOM, no module state, fully unit-tested; the hierarchy is documented in the file header. Every listener delegates here instead of re-deriving priority locally. |
+| `dom-utils.ts` | `deepElementFromPoint`/`extractOwnText` (hover), `resolveFieldContext`/`resolveSurfaceContext` (DOM-structure disambiguation hints), `collectTranslatableTargets` (Translation Mode's full-tree scan), `parentAcrossShadow` (shadow-piercing ancestor walk, exported for `#61`'s scroll-correction reuse), `isElementInViewport` (the ONE predicate shared by the selection highlight and the anchored modal, `#63`). |
+| `Tooltip.tsx` | The tooltip React component — display (Quick Compare: every active language shown, missing/identical-to-source marked, `#59`), inline Custom Label editor, Copy buttons, reports its own rect via `onRectChange` for the hover-ownership zone. Owns TWO rules of its own: the root `onMouseDown` that swallows focus-stealing defaults while an edit is open (modal ownership, `#62`), and element-anchored following when given an `anchorEl` (scroll behaviour, `#63`). |
 | `tooltip.css` | Styles injected into the closed Shadow DOM. |
 | `tooltip-constants.ts` | `TYPE_LABELS`/`TYPE_COLORS`/`langAccent`/`displayApiName` — shared visual language between `Tooltip.tsx` and `translation-mode.tsx`. Also `setupPath` — per-type Setup-navigation URL generator (PHASE 5), returning `null` rather than guessing when a type has no confident mapping. (Copy SOQL/XML Member were removed entirely in `#56`.) |
 | `translation-mode.tsx` | Translation Mode: bulk DOM scan, `RESOLVE_TEXTS_BULK`, inline translation chips appended directly to matched elements (real DOM injection, fully reversible on toggle-off) — including distinct dashed "missing" chips and "≈ identical to source" marks (`DECISIONS.md #58`). The same scan also builds a de-duplicated `AuditEntry[]` (missing/identical/complete status per on-page entry) handed to `content/index.tsx` via `onAuditUpdate` for the Translate All audit panel (`#60`) — one scan, two consumers. `setBadgeScope()` (`#61`) toggles badge visibility for the "current only" translation-scope mode — presentational only, never re-scans. |
-| `AuditPanel.tsx` | The Translate All audit panel (PHASE 18, `#60`) — collapsed pill by default, expands into All/Missing/Identical/Complete filter tabs (stacked label/count per tab, `#61`), a Prev/Next stepper, a translation-scope toggle (All fields/Current only, `#61`), and a clickable entry list. Purely presentational; every action calls back into `content/index.tsx`, which owns scrolling/highlighting/opening the editor. |
+| `AuditPanel.tsx` | The Translate All audit panel (PHASE 18, `#60`) — collapsed pill by default, expands into a search box (`#62`), metadata-type chips (`#63`), All/Missing/Identical/Complete filter tabs (stacked label/count per tab, `#61`), a Prev/Next stepper, a translation-scope toggle (All fields/Current only, `#61`), and a clickable entry list. `filterAuditEntries` (search × type × status) is exported and used by `index.tsx` too, so "what the panel shows" and "what the current target is" cannot disagree. Purely presentational apart from keeping its own active row in view; every action calls back into `content/index.tsx`, which owns scrolling/highlighting/opening the inspector. |
 | `audit-panel.css` | Styles for the above, injected into the SAME closed shadow root the tooltip uses (`ensureShadowRoot()` in `content/index.tsx`) via its own `<style>` tag and mount point — an independent React root, not a shared one, so rendering the panel can never clear the tooltip or vice versa. |
 
 ### `src/background/` — the MV3 service worker
@@ -77,6 +78,57 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 (build entries — anything opened via `chrome.tabs.create` rather than the manifest
 directly, like `health/index.html`, must be listed here too, see `DECISIONS.md #20`),
 `tsconfig.json`, `package.json`.
+
+### `dev-harness/` — real-browser harness for the content script (NOT shipped)
+
+`npm run harness` (its own `vite.harness.config.ts`, no crxjs, different root) serves a
+deliberately Lightning-shaped page — sticky global header, sticky highlights panel, tall
+body, nested scroll container — with `chrome.*` stubbed and fake metadata, and imports
+the REAL `src/content/index.tsx`. Nothing in `src/` imports it and `vite build` never
+sees it.
+
+Why it exists (`DECISIONS.md #63`): the interaction bugs this feature keeps producing
+depend on real browser behaviour that neither unit tests nor jsdom can express — jsdom
+never performs mousedown's focus default action, so a jsdom test of "the editor
+survives an inside click" passes whether or not the product works. The harness found
+three invisible-on-review bugs in one session, including the duplicate-shadow-host root
+cause of "clicking inside the modal closes it".
+
+**Its limits matter as much as its use:** the harness tab runs backgrounded
+(`visibilityState: "hidden"`), so the browser fires no `scroll` events, never runs
+`requestAnimationFrame`, and treats `behavior: "smooth"` as a no-op. Dispatch `scroll`
+events explicitly to exercise scroll-driven code; smooth-scroll animation cannot be
+observed there at all (unit-test the decision instead — see `listScrollDelta`). It is
+also still not a real org: resolution is stubbed, so it proves INTERACTION, never
+metadata correctness.
+
+## Interaction priority model
+
+Several systems compete for the same clicks and keys — the hover engine, the Translate
+All inspector, the inline editor, the panel's search box and list, and the Salesforce
+page itself. Ownership is decided in ONE place, `content/interaction.ts`, by pure
+functions over a snapshot (`DECISIONS.md #63`). Highest priority first:
+
+1. **Active text editor.** Native input behaviour wins outright: arrows move the caret,
+   Enter/Escape belong to the editor, no navigation shortcut may fire. An outside
+   gesture may CANCEL the edit — never destroy the surface around it in the same
+   gesture (two-stage dismissal, `#55`, re-broken by `#62` and restored in `#63`).
+2. **The modal surface.** Anything inside our own UI is an interaction, not a
+   dismissal. Enforced structurally — one closed shadow root means every inside click
+   retargets to one host (`#54`), which only holds while there is exactly ONE host
+   (`#63`).
+3. **The explicit Translate All selection.** A chosen entry is persistent context: it
+   survives scrolling, page mutation and rescans, and only an explicit state transition
+   (`invalidateAuditContext`, `#62`) retires it.
+4. **Panel keyboard navigation.** Live only when nothing above owns the event and the
+   user isn't typing anywhere — except Up/Down inside the panel's own search box, the
+   one deliberate exception (`#63`).
+5. **The hover engine.** Already suppressed wholesale while Translation Mode is on
+   (`isEngineLive()`), so it can never contend with the inspector.
+6. **The Salesforce page.** Everything unclaimed reaches it untouched.
+
+Adding a surface means adding a case there, where the whole hierarchy is visible — not
+another local condition at a listener.
 
 ## Data flow
 

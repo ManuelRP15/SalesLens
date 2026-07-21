@@ -1,11 +1,12 @@
 import { createRoot, type Root } from "react-dom/client";
-import { deepElementFromPoint, resolveHoverTarget, guessObjectApiNameFromUrl, parentAcrossShadow } from "./dom-utils";
+import { deepElementFromPoint, resolveHoverTarget, guessObjectApiNameFromUrl, parentAcrossShadow, isElementInViewport } from "./dom-utils";
 import { Tooltip } from "./Tooltip";
 import tooltipCss from "./tooltip.css?inline";
 import { startTranslationMode, stopTranslationMode, setBadgeScope, type AuditEntry, type BadgeScope, type TmStyle } from "./translation-mode";
-import { AuditPanel, type AuditFilter } from "./AuditPanel";
+import { AuditPanel, filterAuditEntries, type AuditFilter } from "./AuditPanel";
 import auditPanelCss from "./audit-panel.css?inline";
 import { normalizeBareKey } from "../shared/hotkeys";
+import { resolveEscape, resolveNavKey, resolveOutsideClick, type InteractionSnapshot, type NavAction } from "./interaction";
 import type { LabelEntry, ResolveTextResponse, SaveTranslationRequest, SaveTranslationResponse, Settings } from "../shared/types";
 
 function tmStyleFromSettings(s: Settings | undefined): TmStyle {
@@ -27,10 +28,9 @@ const HOVER_DEBOUNCE_MS = 120;
 const CLEAR_GRACE_MS = 300;
 const SCROLL_REINSPECT_MS = 80;
 // Guided navigation (ROADMAP.md PHASE 18): scrollIntoView's "smooth" behavior has no
-// completion callback, so the editor opens after a fixed short delay rather than a
-// true "scroll finished" signal — same pragmatic-timing comfort as the constants
-// above, not a new kind of guess.
-const AUDIT_EDITOR_OPEN_DELAY_MS = 450;
+// completion callback, so the inspector opens after the verify-and-correct chain below
+// has settled rather than on a true "scroll finished" signal — same pragmatic-timing
+// comfort as the constants above, not a new kind of guess.
 // How long to wait after triggering scrollIntoView before checking whether the
 // target actually ended up properly visible (DECISIONS.md #61's sticky-header fix)
 // — long enough for a "smooth" scroll to have settled in the common case.
@@ -55,6 +55,8 @@ let root: Root | undefined;
 /** The audit panel's own independent React root — see `ensureShadowRoot`'s doc comment for why it shares a shadow root with `root` (the tooltip's) rather than getting a second one. */
 let auditRoot: Root | undefined;
 let shadowHost: HTMLDivElement | undefined;
+/** The one closed ShadowRoot, kept explicitly because a CLOSED root is never readable back off its host (`host.shadowRoot` is null by design) — see `ensureShadowRoot`. */
+let shadowRoot: ShadowRoot | undefined;
 let isEnabled = false;
 let activeLanguages: string[] = [];
 let translationModeEnabled = false;
@@ -113,14 +115,27 @@ let lastTooltipArgs: { text: string; x: number; y: number; response: ResolveText
 /** Bumped on every Enter-to-edit press; see `editTrigger` on Tooltip.tsx for why a counter, not a boolean. */
 let editTriggerCounter = 0;
 /** Args of the currently-open Translation Mode click-editor — mirrors `lastTooltipArgs` for the hover path, so Escape/outside-click (see `requestCancelEdit`) can re-render it too. No `language`: the cancel re-render deliberately omits `autoEditLanguage` so the fresh mount starts in view mode instead of re-opening the very edit being cancelled. */
-let lastTmEditorArgs: { entry: LabelEntry; x: number; y: number } | null = null;
+let lastTmEditorArgs: { entry: LabelEntry; x: number; y: number; anchorEl?: Element } | null = null;
 /** Bumped on every Escape/outside-click while an edit is in progress; see `cancelTrigger` on Tooltip.tsx. */
 let cancelTriggerCounter = 0;
+/** Bumped only when a genuinely fresh Tooltip MOUNT is wanted (a new editor); reused as-is when an already-open one is merely being updated — see renderTmTooltip. */
+let tmMountKey = 0;
 
 // ── Translation Audit ("Translate All" evolution, ROADMAP.md PHASE 18) ──────
 /** Every on-page entry Translation Mode's own scan resolved, refreshed on every rescan (including the save-triggered one below) — see `handleAuditUpdate`. */
 let auditEntries: AuditEntry[] = [];
 let auditFilter: AuditFilter = "all";
+/**
+ * Free-text search over the page's entries (DECISIONS.md #62) — a SECOND, independent
+ * axis on top of the filter tabs, not an alternative to them: "Account" + "Missing"
+ * means missing entries matching Account. Session-local like every other piece of
+ * panel state here, and reset on every Translation Mode activation.
+ */
+let auditSearch = "";
+/** True while the panel's own search input holds focus — the one case where keyboard navigation and a text field legitimately share the keyboard, see `resolveNavKey`. */
+let auditSearchFocused = false;
+/** Selected metadata-type labels (`typeLabel()` strings, e.g. "Custom Field"). Empty = no type restriction. Third independent filter axis alongside the status tabs and the search box (DECISIONS.md #63). */
+let auditTypeFilters: string[] = [];
 /** Index into the CURRENTLY FILTERED list, not `auditEntries` itself — AuditPanel re-clamps it against the live filtered array on every render, so a save that shrinks the list can't leave this pointing past the end. */
 let auditIndex = 0;
 /** Collapsed by default (a small pill) — expands into the full panel on click. Reset to a fresh state (collapsed, "All", index 0) every time Translation Mode turns on, see `applyTranslationModeSetting`. */
@@ -144,6 +159,16 @@ let highlightTarget: Element | null = null;
 let highlightRepositionHandler: (() => void) | undefined;
 let auditEditorOpenTimer: number | undefined;
 let auditScrollCorrectionTimer: number | undefined;
+/**
+ * Bumped by every audit state transition (navigate, filter, search, scope, collapse,
+ * Translation Mode off). Guided navigation is a multi-step ASYNC chain — scroll, wait,
+ * verify, correct, wait, open the inspector — and `clearTimeout` alone can't express
+ * "abandon the chain that's already several steps in": each step re-checks this token
+ * and bails if the world moved on. Without it, a slow chain from a previous target can
+ * still pop its inspector open on top of the new one seconds later, which is exactly
+ * the "stale modal attached to previous state" class of bug.
+ */
+let auditNavToken = 0;
 
 document.addEventListener(
   "mousemove",
@@ -258,40 +283,42 @@ window.addEventListener(
       });
       return;
     }
-    // While editing, Escape cancels the edit itself (requestCancelEdit) rather than
-    // falling through to exitInspectionMode/closeTmEditor, which still no-op during an
-    // edit by design — see DECISIONS.md #55. preventDefault/stopPropagation here is
-    // safe now (it wasn't previously): this used to deliberately let the event bubble
-    // to the editor's own local Escape handler since that was the ONLY thing that could
-    // cancel a stuck edit; requestCancelEdit replaces that reliance (and works even
-    // when a disabled Save button stole focus away from the textarea, which the local
-    // handler alone could not).
-    if (e.key === "Escape" && isEditingActive) {
-      e.preventDefault();
-      e.stopPropagation();
-      requestCancelEdit();
+    // Escape's whole ladder is resolved in ONE place now (`interaction.ts`) instead of
+    // five sequential branches that each had to re-derive the priority order — see
+    // DECISIONS.md #63. preventDefault/stopPropagation while editing is safe (and was
+    // added deliberately in #55): the editor's own local Escape handler is no longer
+    // the only thing that can cancel a stuck edit, so swallowing the event here can't
+    // strand one.
+    if (e.key === "Escape") {
+      const action = resolveEscape(interactionSnapshot());
+      if (action === "none") return;
+      if (action === "cancel-edit") {
+        e.preventDefault();
+        e.stopPropagation();
+        requestCancelEdit();
+      } else if (action === "close-tooltip") {
+        // Covers both surfaces: the hover engine's pinned tooltip (toggle-pinned OR
+        // standalone hold-peek — exitInspectionMode's own guard, #56, handles both)
+        // and the Translate All inspector.
+        exitInspectionMode();
+        if (tmEditorOpen) closeTmEditor();
+      } else if (action === "clear-search") {
+        handleAuditSearchChange("");
+      } else if (action === "collapse-panel") {
+        handleAuditToggleExpanded();
+      }
       return;
     }
-    // Escape closes whatever the hover engine currently has showing — toggle mode
-    // pinned, OR a tooltip pinned purely via a standalone holdHotkey peek (toggle mode
-    // never engaged) — exitInspectionMode's own guard (DECISIONS.md #56) now covers
-    // both, so this check just needs to know there's something TO close.
-    if (e.key === "Escape" && (inspectionModeActive || currentTooltipText !== null)) {
-      exitInspectionMode();
-      return;
-    }
-    if (e.key === "Escape" && tmEditorOpen) {
-      closeTmEditor();
-      return;
-    }
-    // Lowest-priority Escape: collapse the audit panel (ROADMAP.md PHASE 18) back to
-    // its pill — it's a persistent companion, not a transient popover, so it doesn't
-    // auto-collapse on outside clicks the way the tooltip does; Escape is its one
-    // explicit "back out" gesture, same convention as everything above it.
-    if (e.key === "Escape" && auditExpanded) {
-      auditExpanded = false;
-      renderAuditPanel();
-      return;
+    // Audit panel keyboard navigation (`#63`) — priority 4: `resolveNavKey` returns
+    // "none" whenever an editor, a real page field, or simply "nothing to navigate"
+    // outranks it, so this can never eat a keystroke meant for something else.
+    if (!e.repeat && translationModeEnabled) {
+      const nav = resolveNavKey(e.key, interactionSnapshot());
+      if (nav !== "none") {
+        e.preventDefault();
+        handleAuditNavKey(nav);
+        return;
+      }
     }
     // Enter-to-edit (PHASE 17): only while Inspection Mode is on AND a tooltip is
     // actually showing — unlike the inspector/TM toggle keys above, this one stays
@@ -354,20 +381,29 @@ window.addEventListener("blur", () => {
 // that could go stale, which is exactly what made the earlier pointer-events:none +
 // geometry approach (DECISIONS.md #45/#52) still close on some inside clicks. Only a
 // click on genuinely different page content (target ≠ shadowHost), Escape, or the
-// toggle key closes it now. See DECISIONS.md #54. While editing, an outside click
-// cancels the edit (requestCancelEdit) instead of being inert — same reasoning as the
-// Escape branch above, see DECISIONS.md #55. exitInspectionMode() is called
+// toggle key closes it now. See DECISIONS.md #54. While editing, an outside click used
+// to only CANCEL the edit and leave the tooltip open (#55, a two-stage dismissal); it
+// now closes outright — see the inline comment below and DECISIONS.md #62.
+// exitInspectionMode() is called
 // unconditionally (no `if (inspectionModeActive)` guard) — its own internal check
 // (DECISIONS.md #56) already covers "close whatever's showing, toggle-pinned or
 // standalone-hold-pinned alike," same reasoning as the Escape branch above.
 document.addEventListener("click", (e) => {
   if (shadowHost && e.target === shadowHost) return;
-  if (isEditingActive) {
+  // Two-stage while editing, restored after `#62` regressed it into a single
+  // destroy-everything gesture: the first outside click ends the EDIT and leaves the
+  // metadata on screen to keep reading, the second closes the surface. Both surfaces
+  // resolve through the same rule — see `resolveOutsideClick` (DECISIONS.md #63) for
+  // the full reasoning and the regression tests that now pin it.
+  const action = resolveOutsideClick(interactionSnapshot());
+  if (action === "cancel-edit") {
     requestCancelEdit();
     return;
   }
-  exitInspectionMode();
-  if (tmEditorOpen) closeTmEditor();
+  if (action === "close-tooltip") {
+    exitInspectionMode();
+    if (tmEditorOpen) closeTmEditor();
+  }
 });
 
 // Scrolling moves the page under a stationary cursor without any mouse event — the
@@ -420,6 +456,16 @@ function ensureHighlightStylesheet() {
 /** Resyncs the highlight overlay to its target's LIVE rect — called on scroll/resize while a highlight is active, since `scrollIntoView`'s smooth animation fires many scroll events before settling. */
 function positionHighlight() {
   if (!highlightEl || !highlightTarget) return;
+  // A SELECTED item is not a hover target (DECISIONS.md #63): it keeps tracking its
+  // element for as long as that element is on screen, and simply stops being drawn
+  // once it isn't — rather than following it off the edge, where a rectangle clipped
+  // against the viewport reads as a rendering glitch and, at the extremes, as a stray
+  // line stuck to the side of the page. Nothing about the SELECTION changes here; the
+  // panel's selected row is what states which item is current, and it stays put. Same
+  // predicate the anchored modal uses, so the two can't disagree.
+  const visible = isElementInViewport(highlightTarget);
+  highlightEl.style.display = visible ? "" : "none";
+  if (!visible) return;
   const rect = highlightTarget.getBoundingClientRect();
   highlightEl.style.left = `${rect.left - 4}px`;
   highlightEl.style.top = `${rect.top - 4}px`;
@@ -466,9 +512,9 @@ function highlightElement(el: Element) {
   window.addEventListener("resize", highlightRepositionHandler, { passive: true });
 }
 
-/** Same filter predicate `AuditPanel` itself applies — kept in sync here so `updateBadgeScope` (and anything else that needs "what's the current entry") agrees with what the panel is actually displaying. */
+/** Literally the same function `AuditPanel` renders from (filter AND search) — imported rather than re-implemented, so "what the panel shows" and "what the panel's current target is" can never disagree. */
 function currentFilteredAuditEntries(): AuditEntry[] {
-  return auditFilter === "all" ? auditEntries : auditEntries.filter((e) => e.status === auditFilter);
+  return filterAuditEntries(auditEntries, auditFilter, auditSearch, auditTypeFilters);
 }
 
 function currentAuditEntry(): AuditEntry | undefined {
@@ -488,6 +534,10 @@ function renderAuditPanel() {
       entries={auditEntries}
       filter={auditFilter}
       onFilterChange={handleAuditFilterChange}
+      search={auditSearch}
+      onSearchChange={handleAuditSearchChange}
+      typeFilters={auditTypeFilters}
+      onTypeFiltersChange={handleAuditTypeFiltersChange}
       currentIndex={auditIndex}
       onNavigate={handleAuditNavigate}
       expanded={auditExpanded}
@@ -508,15 +558,63 @@ function handleAuditUpdate(entries: AuditEntry[]) {
   updateBadgeScope();
 }
 
+/**
+ * THE audit-side state transition (DECISIONS.md #62). Changing the filter, the search,
+ * the scope, or collapsing the panel doesn't just re-render a list — it invalidates the
+ * CONTEXT the currently-open inspector belongs to: it was opened for a specific target
+ * reached through a specific view, and after the transition that target may not even be
+ * in the list any more. So every one of those actions funnels through here, which
+ * abandons any in-flight guided navigation, drops the highlight, and closes the
+ * inspector cleanly — rather than each handler remembering its own subset of that
+ * cleanup (the old shape, which is why some transitions left a stale modal behind).
+ *
+ * Deliberately NOT called by anything the user does INSIDE the inspector — those are
+ * interactions, not transitions, and the inspector owns them entirely (see Tooltip's
+ * `handleMouseDown`).
+ */
+function invalidateAuditContext() {
+  auditNavToken++;
+  window.clearTimeout(auditEditorOpenTimer);
+  window.clearTimeout(auditScrollCorrectionTimer);
+  clearHighlight();
+  forceCloseInspector();
+}
+
+/**
+ * Closes the tooltip/inspector regardless of whether an edit is currently open.
+ * `clearTooltip()` on its own deliberately refuses to run mid-edit (an active edit owns
+ * the tooltip — that guard is what protects a focused textarea from every incidental
+ * clear), but an EXPLICIT state transition outranks that ownership: the user asked for
+ * something that makes this editor meaningless, so it goes. Dropping the flag first is
+ * safe because the unmount fires `CandidateBlock`'s own `onEditingActiveChange(false)`
+ * cleanup immediately after, leaving nothing inconsistent behind.
+ */
+function forceCloseInspector() {
+  if (!tmEditorOpen && currentTooltipText === null) return;
+  isEditingActive = false;
+  clearTooltip();
+}
+
 function handleAuditFilterChange(filter: AuditFilter) {
-  // Switching filters is an explicit "I'm moving on" action, same as Next/Previous —
-  // cancels whatever's mid-edit rather than leaving it open on an entry the panel's
-  // own state no longer points at (DECISIONS.md #61, matches Escape/outside-click's
-  // existing cancel-on-explicit-action precedent, #55).
-  if (isEditingActive) requestCancelEdit();
+  invalidateAuditContext();
   auditFilter = filter;
   auditIndex = 0;
-  clearHighlight();
+  renderAuditPanel();
+  updateBadgeScope();
+}
+
+function handleAuditSearchChange(search: string) {
+  invalidateAuditContext();
+  auditSearch = search;
+  auditIndex = 0;
+  renderAuditPanel();
+  updateBadgeScope();
+}
+
+function handleAuditTypeFiltersChange(types: string[]) {
+  invalidateAuditContext();
+  auditTypeFilters = types;
+  auditIndex = 0;
   renderAuditPanel();
   updateBadgeScope();
 }
@@ -528,6 +626,11 @@ function handleAuditScopeChange(scope: BadgeScope) {
 }
 
 function handleAuditToggleExpanded() {
+  // Collapsing hides the very list the inspector's target was selected from — the
+  // panel is back to a summary pill, so a modal still floating over the page belongs
+  // to a context the user can no longer see or navigate. Expanding invalidates
+  // nothing (there's no open target yet).
+  if (auditExpanded) invalidateAuditContext();
   auditExpanded = !auditExpanded;
   renderAuditPanel();
 }
@@ -610,48 +713,73 @@ function ensureVisibleAboveObstruction(el: Element): boolean {
 }
 
 /**
- * Scrolls to and highlights the target unconditionally, then — only for `missing`/
- * `identical` entries that are actually editable — opens the SAME editor a
- * Translation Mode chip click would (`openTmEditor`), pre-seeded on the SPECIFIC
- * language that made the entry match the current filter, not just the first one.
- * `complete` entries (or a non-editable type, e.g. a standard field/picklist,
- * `ObjectLabel`) still scroll/highlight so the user can SEE it, but no editor
- * auto-opens — there's either nothing to fix or nothing to write back to yet.
+ * Scrolls to the target, highlights it, and opens the inspector on it. Navigating is a
+ * state transition (`invalidateAuditContext`) — the PREVIOUS target's inspector closes
+ * first, unconditionally, instead of being left floating over a page that has already
+ * scrolled somewhere else.
  *
- * Navigating to a new entry is an explicit "I'm moving on" action — cancels
- * whatever's mid-edit rather than silently refusing to open the new target's editor
- * (`openTmEditor` itself guards `isEditingActive`, so without this the OLD editor
- * would just sit there pointed at an entry the highlight/scroll already left).
+ * The whole chain is guarded by a navigation token: `scrollIntoView`'s smooth behavior
+ * has no completion callback, so this is inherently "wait, then check, then maybe
+ * correct, then open" — and every one of those steps must be abandonable the instant
+ * the user clicks Next again or types in the search box.
  */
 function handleAuditNavigate(index: number, entry: AuditEntry) {
-  if (isEditingActive) requestCancelEdit();
+  invalidateAuditContext();
+  const token = auditNavToken;
   auditIndex = index;
   renderAuditPanel();
   updateBadgeScope(entry.element);
   entry.element.scrollIntoView({ behavior: "smooth", block: "center" });
   highlightElement(entry.element);
-  window.clearTimeout(auditEditorOpenTimer);
-  window.clearTimeout(auditScrollCorrectionTimer);
   auditScrollCorrectionTimer = window.setTimeout(() => {
-    const corrected = ensureVisibleAboveObstruction(entry.element);
-    auditEditorOpenTimer = window.setTimeout(
-      () => openAuditEditorIfApplicable(entry),
-      corrected ? SCROLL_CORRECTION_SETTLE_MS : 0
-    );
+    if (token !== auditNavToken) return;
+    if (!ensureVisibleAboveObstruction(entry.element)) {
+      openAuditInspector(entry, token);
+      return;
+    }
+    // A corrective scroll can itself change what's obstructing the target: Lightning's
+    // sticky highlights panel collapses/expands as the page scrolls, and correcting
+    // inside a NESTED container can bring the target under chrome that wasn't in the
+    // way when the first measurement was taken. One more verify-and-correct pass
+    // settles those cases; a THIRD would be chasing an animation, not converging.
+    auditEditorOpenTimer = window.setTimeout(() => {
+      if (token !== auditNavToken) return;
+      ensureVisibleAboveObstruction(entry.element);
+      auditEditorOpenTimer = window.setTimeout(() => openAuditInspector(entry, token), SCROLL_CORRECTION_SETTLE_MS);
+    }, SCROLL_CORRECTION_SETTLE_MS);
   }, SCROLL_SETTLE_CHECK_MS);
 }
 
-function openAuditEditorIfApplicable(entry: AuditEntry) {
-  if (!entry.editable) return;
-  const relevantLanguage =
-    entry.status === "missing"
+/**
+ * Opens the SAME tooltip surface the hover engine uses, on the entry guided navigation
+ * just landed on — ALWAYS, not only for editable problem entries (DECISIONS.md #62).
+ *
+ * The earlier behavior opened an editor for editable `missing`/`identical` entries and
+ * showed nothing at all otherwise, which quietly split one interaction into two: for
+ * some rows a click told you everything (type, API name, every language's value, Setup
+ * link, edit), and for others it just scrolled the page and left you to go turn on
+ * Dynamic Hover to find out what you were even looking at. That gap — not a missing
+ * feature — was the real friction behind "should Translate All have its own inspect
+ * action": the inspector was already there, just conditionally withheld. So the rule is
+ * now uniform — navigate = see everything about this entry — and the ONLY thing status/
+ * editability still decides is whether it lands pre-opened on the language that needs
+ * work, or in read-only view mode. No second inspection system, no extra mode, no new
+ * shortcut, no click that means something different depending on the row.
+ */
+function openAuditInspector(entry: AuditEntry, token: number) {
+  if (token !== auditNavToken) return;
+  // Something the user started in the meantime (e.g. clicking an on-page chip) owns
+  // the tooltip — never rip a focused editor away for a scroll that finished late.
+  if (isEditingActive) return;
+  const problemLanguage = entry.editable
+    ? entry.status === "missing"
       ? entry.missingLanguages[0]
       : entry.status === "identical"
         ? entry.identicalLanguages[0]
-        : undefined;
-  if (!relevantLanguage) return;
+        : undefined
+    : undefined;
   const rect = entry.element.getBoundingClientRect();
-  openTmEditor(entry.entry, relevantLanguage, rect.left + 12, rect.bottom + 8);
+  renderTmTooltip(entry.entry, rect.left + 12, rect.bottom + 8, problemLanguage, entry.element);
 }
 
 function applyTranslationModeSetting(enabled: boolean) {
@@ -664,6 +792,7 @@ function applyTranslationModeSetting(enabled: boolean) {
     // not helpful, to carry forward.
     auditEntries = [];
     auditFilter = "all";
+    auditSearch = "";
     auditIndex = 0;
     auditExpanded = false;
     auditScope = "all";
@@ -671,8 +800,9 @@ function applyTranslationModeSetting(enabled: boolean) {
     startTranslationMode(activeLanguages, tmStyle, openTmEditor, handleAuditUpdate);
   } else {
     stopTranslationMode();
-    clearTooltip();
-    clearHighlight();
+    // Turning Translate All off is the most total context change there is — the
+    // inspector goes even mid-edit, same rule as every other transition.
+    invalidateAuditContext();
     auditEntries = [];
     ensureAuditHost().render(null);
     document.getElementById(AUDIT_HIGHLIGHT_STYLE_ID)?.remove();
@@ -732,11 +862,21 @@ loadRealCustomLabels();
  * would (`host.render()` replaces whatever was mounted there).
  */
 function ensureShadowRoot(): ShadowRoot {
-  if (shadowHost?.shadowRoot) return shadowHost.shadowRoot;
+  // `shadowHost.shadowRoot` is ALWAYS null for a root attached in CLOSED mode — that
+  // is the entire point of closed mode, and it silently broke this guard: every caller
+  // created its OWN host, so the "one shared root" this comment promises was actually
+  // two (`#sti-root` twice in the DOM), and `shadowHost` pointed at whichever was
+  // created last. Since click ownership is decided by `e.target === shadowHost`
+  // identity, every click inside the OTHER surface then read as an outside click and
+  // dismissed the tooltip — the exact "clicking inside the modal closes it" regression,
+  // which only appeared once Translate All (`#60`) introduced a second mount and made
+  // two hosts possible. Keeping our own reference is the fix; see DECISIONS.md #63.
+  if (shadowRoot) return shadowRoot;
   shadowHost = document.createElement("div");
   shadowHost.id = "sti-root";
   document.documentElement.appendChild(shadowHost);
-  return shadowHost.attachShadow({ mode: "closed" });
+  shadowRoot = shadowHost.attachShadow({ mode: "closed" });
+  return shadowRoot;
 }
 
 function ensureHost(): Root {
@@ -861,14 +1001,48 @@ function saveTranslation(
  * (remounts WITHOUT `autoEditLanguage`, landing in view mode — the TM editor's own
  * "cancel" mechanism, since it always force-remounts anyway).
  */
-function renderTmTooltip(entry: LabelEntry, x: number, y: number, autoEditLanguage?: string) {
+function renderTmTooltip(
+  entry: LabelEntry,
+  x: number,
+  y: number,
+  autoEditLanguage?: string,
+  /** The page element this inspector is ABOUT — present for guided navigation (which always has one), absent for a chip click. Makes the modal element-anchored rather than point-anchored; see Tooltip.tsx's `anchorEl`. */
+  anchorEl?: Element
+) {
   tmEditorOpen = true;
   currentTooltipText = null;
-  lastTmEditorArgs = { entry, x, y };
-  const host = ensureHost();
-  host.render(null);
-  host.render(
+  lastTmEditorArgs = { entry, x, y, anchorEl };
+  // A genuinely NEW editor needs a fresh MOUNT, because `autoEditLanguage` is only
+  // read in `CandidateBlock`'s useState initializers — clicking the same chip twice
+  // has to re-open its editor, not just update props on the instance already there.
+  // A changing `key` is what actually guarantees that: `root.render()` reconciles its
+  // single child BY KEY, so a new key deletes the old fiber and mounts a new one. The
+  // previous `render(null)` + `render(element)` pair was NOT a reliable remount —
+  // React 18 batches both calls into one update and renders only the final element —
+  // which is precisely why cancelling an edit on this surface silently did nothing
+  // (see `requestCancelEdit`). Found with the dev harness; DECISIONS.md #63.
+  tmMountKey++;
+  ensureHost().render(tmTooltipElement(tmMountKey, entry, x, y, autoEditLanguage, anchorEl));
+}
+
+/**
+ * The element itself, split out so `requestCancelEdit` can re-render the SAME mount
+ * (same key) carrying only a bumped `cancelTrigger` — updating the live instance
+ * rather than replacing it. That is what finally makes both surfaces cancel through
+ * ONE mechanism: the hover path always used `cancelTrigger`, while this path relied on
+ * a remount that didn't reliably happen.
+ */
+function tmTooltipElement(
+  key: number,
+  entry: LabelEntry,
+  x: number,
+  y: number,
+  autoEditLanguage?: string,
+  anchorEl?: Element
+) {
+  return (
     <Tooltip
+      key={key}
       text={entry.apiName}
       x={x}
       y={y}
@@ -876,6 +1050,8 @@ function renderTmTooltip(entry: LabelEntry, x: number, y: number, autoEditLangua
       activeLanguages={activeLanguages}
       flagIdentical={tmStyle.flagIdentical}
       autoEditLanguage={autoEditLanguage}
+      anchorEl={anchorEl}
+      cancelTrigger={cancelTriggerCounter}
       onSaveTranslation={saveTranslation}
       onEditingActiveChange={(active) => {
         isEditingActive = active;
@@ -930,7 +1106,66 @@ function showTooltip(text: string, x: number, y: number, response: ResolveTextRe
 function isTypingInPage(): boolean {
   const el = document.activeElement as HTMLElement | null;
   if (!el || el === document.body) return false;
+  // Focus inside our own CLOSED shadow root surfaces as the host element, never as the
+  // real field — so this can only ever be true for a genuine PAGE field, which is
+  // exactly the distinction it's asked to make.
+  if (el === shadowHost) return false;
   return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+}
+
+/** Class on the audit panel's search input — the one control inside our own UI that legitimately shares the keyboard with list navigation (see `resolveNavKey`). */
+const SEARCH_INPUT_CLASS = "sti-audit-search-input";
+
+/**
+ * Is focus in the panel's OWN search box? Read straight off the shadow root's live
+ * `activeElement` rather than tracked with React focus handlers and a module flag: a
+ * flag can go stale (a re-render, a node React decides to replace, a focus change that
+ * never fires the handler), and every one of those failures shows up as the keyboard
+ * mysteriously doing the wrong thing. The DOM already knows the answer, and we hold the
+ * only reference to this closed root, so just ask it. Note `document.activeElement`
+ * cannot answer this — from outside, focus inside a closed root reads as the host.
+ */
+function isTypingInPanelSearch(): boolean {
+  const active = shadowRoot?.activeElement as HTMLElement | null;
+  return active?.classList.contains(SEARCH_INPUT_CLASS) ?? false;
+}
+
+/**
+ * Builds the snapshot `interaction.ts` resolves ownership from. One place that reads
+ * live module state, so the RULES themselves stay pure and testable — see
+ * `interaction.ts`'s header for the hierarchy this feeds.
+ */
+function interactionSnapshot(): InteractionSnapshot {
+  return {
+    editing: isEditingActive,
+    surface: tmEditorOpen ? "inspector" : currentTooltipText !== null ? "hover" : "none",
+    panelExpanded: translationModeEnabled && auditExpanded,
+    panelHasEntries: currentFilteredAuditEntries().length > 0,
+    typingInPage: isTypingInPage(),
+    typingInPanelSearch: isTypingInPanelSearch(),
+    searchActive: auditSearch !== "",
+  };
+}
+
+/**
+ * Keyboard navigation lands on exactly the same `handleAuditNavigate` the Prev/Next
+ * buttons and list rows call — no parallel path, so scroll correction, highlighting,
+ * the internal list scroll and the inspector all behave identically however the user
+ * got there. "activate" (Enter) re-navigates to the CURRENT entry rather than doing
+ * something separate: after arrowing to a row, Enter means "take me there", which is
+ * the same action a click on that row already performs.
+ */
+function handleAuditNavKey(action: NavAction) {
+  const list = currentFilteredAuditEntries();
+  if (list.length === 0) return;
+  const current = Math.min(auditIndex, list.length - 1);
+  const nextIndex =
+    action === "next"
+      ? Math.min(current + 1, list.length - 1)
+      : action === "prev"
+        ? Math.max(current - 1, 0)
+        : current;
+  handleAuditNavigate(nextIndex, list[nextIndex]);
 }
 
 /**
@@ -953,11 +1188,15 @@ function isTypingInPage(): boolean {
  */
 function requestCancelEdit() {
   if (!isEditingActive) return;
+  cancelTriggerCounter++;
   if (lastTooltipArgs) {
-    cancelTriggerCounter++;
     showTooltip(lastTooltipArgs.text, lastTooltipArgs.x, lastTooltipArgs.y, lastTooltipArgs.response);
   } else if (lastTmEditorArgs) {
-    renderTmTooltip(lastTmEditorArgs.entry, lastTmEditorArgs.x, lastTmEditorArgs.y);
+    // SAME mount key on purpose — this updates the open tooltip so its `cancelTrigger`
+    // effect fires, instead of trying to force a remount into view mode (which is what
+    // silently failed before; see `renderTmTooltip`).
+    const { entry, x, y, anchorEl } = lastTmEditorArgs;
+    ensureHost().render(tmTooltipElement(tmMountKey, entry, x, y, undefined, anchorEl));
   }
 }
 

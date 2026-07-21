@@ -373,3 +373,18 @@ export function resolveHoverTarget(x: number, y: number): HoverTarget | null {
     },
   };
 }
+
+/**
+ * Is any part of this element currently within the viewport? Shared by the two things
+ * that visually represent a SELECTED Translate All target — the highlight rectangle
+ * (content/index.tsx) and the inspector modal itself (Tooltip.tsx) — so they can never
+ * disagree about whether their target is on screen (DECISIONS.md #63). Partial
+ * visibility counts: a field half-scrolled off the top edge is still the thing the
+ * user is looking at, and blinking its highlight out at the halfway mark would read as
+ * a glitch rather than a rule.
+ */
+export function isElementInViewport(el: Element): boolean {
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return false;
+  return rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth;
+}
