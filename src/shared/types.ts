@@ -83,6 +83,51 @@ export function isEditableLabelType(type: LabelType): boolean {
   return EDITABLE_LABEL_TYPES.has(type);
 }
 
+/**
+ * FIELD-LEVEL editability, on top of `isEditableLabelType`'s type-level gate — real-org
+ * testing (2026-07-21, DECISIONS.md #56) showed Salesforce rejects `FieldLabel`/
+ * `PicklistValue` deploys for STANDARD fields with real, specific errors ("Cannot
+ * translate standard field: Account.Fax", "Can't translate standard picklist Type with
+ * Custom Object Translations. Use Standard Value Set instead.") — standard picklists
+ * need an entirely different, unbuilt mechanism (`StandardValueSetTranslation`), and
+ * some standard fields aren't renamable via metadata at all. Rather than keep offering
+ * an edit button that Salesforce will reliably reject, this narrows editing to CUSTOM
+ * fields/picklists only (`__c` suffix) — standard ones stay fully readable via hover
+ * (unaffected; that path never touches this file) but lose the edit affordance until a
+ * real standard-value-set write path is built. Global value sets (no dot before `#`)
+ * are unaffected by this — different mechanism (`GlobalValueSetTranslation`), no
+ * evidence of the same rejection.
+ */
+export function isEditableEntry(entry: LabelEntry): boolean {
+  if (!isEditableLabelType(entry.type)) return false;
+  if (entry.type === "FieldLabel") {
+    const fieldApiName = entry.apiName.split(".").pop() ?? "";
+    return fieldApiName.endsWith("__c");
+  }
+  if (entry.type === "PicklistValue") {
+    const [left] = entry.apiName.split("#");
+    if (!left.includes(".")) return true; // global value set — different mechanism, unaffected
+    const fieldApiName = left.split(".").pop() ?? "";
+    return fieldApiName.endsWith("__c");
+  }
+  return true;
+}
+
+/**
+ * "Simple mode" (default ON — see DECISIONS.md #56 and PRODUCT.md): the product's core
+ * value is Object/Field/Picklist/Label translations — buttons, quick actions, tabs,
+ * apps, record types, layout sections carry disproportionate edge-case risk (global vs.
+ * object-specific quick actions, standard-vs-custom picklist mechanisms, XSD ordering...)
+ * for how rarely they're the actual translation gap someone's chasing. Simple mode
+ * doesn't remove anything already built — it just doesn't SURFACE the advanced types
+ * via hover/Translation Mode/Translation Health until the user opts into Advanced mode.
+ */
+const SIMPLE_SCOPE_TYPES: ReadonlySet<LabelType> = new Set(["ObjectLabel", "FieldLabel", "PicklistValue", "CustomLabel"]);
+
+export function isInSimpleScope(type: LabelType): boolean {
+  return SIMPLE_SCOPE_TYPES.has(type);
+}
+
 export interface SaveTranslationRequest {
   type: "SAVE_TRANSLATION";
   origin: string;
@@ -205,16 +250,39 @@ export interface Settings {
   /** Show the language code (es, fr...) on each Translation Mode chip. */
   tmShowLangCodes: boolean;
   /**
-   * Key held to activate the hover inspector (KeyboardEvent.key, e.g. "Alt",
-   * "Control", "Shift", "q"). null = inspector always active while enabled
-   * (the pre-hotkey behavior). While held, the cursor becomes a magnifier.
+   * Key that TOGGLES Inspection Mode on/press (KeyboardEvent.key, e.g. "Alt",
+   * "Control", "Shift", "q"). null = inspector always active while enabled (Always
+   * Hover, the pre-hotkey behavior — classic continuous glance-and-go, unaffected by
+   * the pin/sticky redesign below). Once toggled on, the FIRST resolvable element the
+   * cursor reaches pins the tooltip — see DECISIONS.md #56: unlike the old behavior,
+   * further mouse movement alone no longer retargets it (only `holdHotkey`, Escape, or
+   * an outside click can move/close it) — deliberate mode, not glance-and-go.
    */
   inspectorHotkey: string | null;
+  /**
+   * A SEPARATE key (DECISIONS.md #56) that grants temporary retargeting while held —
+   * the "Minecraft shift" companion to `inspectorHotkey`'s sticky toggle: hold it,
+   * hover freely (live, zero-debounce, exactly like Inspection Mode used to always
+   * behave), release to pin the tooltip on whatever's under the cursor at that moment.
+   * Works independently of whether Inspection Mode is toggled on — it's how you EVER
+   * move a pinned tooltip to a different element without closing it first. null =
+   * disabled (Inspection Mode's pin becomes permanent until Escape/outside-click).
+   */
+  holdHotkey: string | null;
   /** Key combination toggling Translation Mode on/off, e.g. "Alt+T". null = no shortcut. */
   tmHotkey: string | null;
+  /**
+   * Simple mode (default true, DECISIONS.md #56/PRODUCT.md): only surface
+   * Object/Field/Picklist/Custom Label translations via hover, Translation Mode, and
+   * Translation Health. Advanced types (buttons, quick actions, tabs, apps, record
+   * types, layout sections) stay fully built and reachable by turning this off — never
+   * removed, just not the default surface.
+   */
+  simpleMode: boolean;
 }
 
 export const DEFAULT_INSPECTOR_HOTKEY = "Alt";
+export const DEFAULT_HOLD_HOTKEY = "Shift";
 export const DEFAULT_TM_HOTKEY = "Alt+T";
 
 /** One row of the Translation Health registry — which languages a given element is missing. */

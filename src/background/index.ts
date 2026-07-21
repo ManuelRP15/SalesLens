@@ -3,7 +3,7 @@ import { MOCK_LABEL_ENTRIES } from "../shared/mock-data";
 import { fetchAllTranslations, saveCustomLabelTranslation, toApiHost } from "../shared/salesforce-api";
 import { fetchMetadataTranslationEntries } from "../shared/metadata-translations";
 import { saveMetadataTranslation } from "../shared/metadata-write";
-import { isEditableLabelType } from "../shared/types";
+import { isEditableEntry, isInSimpleScope } from "../shared/types";
 import type {
   ResolveTextRequest,
   ResolveTextResponse,
@@ -28,7 +28,9 @@ const DEFAULT_SETTINGS: Settings = {
   tmShowFlags: true,
   tmShowLangCodes: true,
   inspectorHotkey: "Alt",
+  holdHotkey: "Shift",
   tmHotkey: "Alt+T",
+  simpleMode: true,
 };
 
 let reverseIndex: ReverseIndex = buildReverseIndex(MOCK_LABEL_ENTRIES);
@@ -53,6 +55,23 @@ void chrome.storage.local.get("cachedEntries").then((stored) => {
   }
 });
 
+/**
+ * A synchronous mirror of storage's `settings`, kept fresh via `chrome.storage.onChanged`
+ * below — RESOLVE_TEXT/RESOLVE_TEXTS_BULK need `simpleMode` on the hot hover path
+ * (rule: hover must feel instant), and an async `chrome.storage.local.get` per hover
+ * would be exactly the kind of latency this project's speed bar exists to prevent.
+ * `getSettings()` remains the source of truth for anything that can afford to be async.
+ */
+let cachedSettings: Settings = DEFAULT_SETTINGS;
+void chrome.storage.local.get("settings").then((stored) => {
+  cachedSettings = { ...DEFAULT_SETTINGS, ...(stored.settings as Partial<Settings> | undefined) };
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.settings) {
+    cachedSettings = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue as Partial<Settings> | undefined) };
+  }
+});
+
 async function getSettings(): Promise<Settings> {
   const stored = await chrome.storage.local.get("settings");
   return { ...DEFAULT_SETTINGS, ...(stored.settings as Partial<Settings> | undefined) };
@@ -74,13 +93,29 @@ async function getSessionId(apiHost: string): Promise<string | null> {
   }
 }
 
-/** Which of the user's active languages each entry has no translated value for. */
-function computeTranslationHealth(entries: LabelEntry[], languages: string[]): TranslationHealthEntry[] {
-  return entries.map((entry) => ({
-    apiName: entry.apiName,
-    type: entry.type,
-    missingLanguages: languages.filter((lang) => !entry.valuesByLang[lang]),
-  }));
+/** Which of the user's active languages each entry has no translated value for. Scoped by simpleMode (DECISIONS.md #56) — same "what's out of scope stays invisible everywhere" rule as hover/Translation Mode, not just the health report's own separate filter. */
+function computeTranslationHealth(entries: LabelEntry[], languages: string[], simpleMode: boolean): TranslationHealthEntry[] {
+  return entries
+    .filter((entry) => !simpleMode || isInSimpleScope(entry.type))
+    .map((entry) => ({
+      apiName: entry.apiName,
+      type: entry.type,
+      missingLanguages: languages.filter((lang) => !entry.valuesByLang[lang]),
+    }));
+}
+
+/**
+ * Applies `settings.simpleMode` to a resolveText() result — the ONE choke point both
+ * hover (RESOLVE_TEXT) and Translation Mode (RESOLVE_TEXTS_BULK) go through, so
+ * scoping stays consistent between them without touching resolveText's own
+ * disambiguation logic (index-builder.ts) at all. Since resolveText already guarantees
+ * 0-or-1 candidates (rule #4), filtering out an out-of-scope one just means "no match" —
+ * same silence-over-a-wrong-answer shape as every other suppression in this project.
+ */
+function applySimpleScope(response: ResolveTextResponse, simpleMode: boolean): ResolveTextResponse {
+  if (!simpleMode) return response;
+  const candidates = response.candidates.filter((c) => isInSimpleScope(c.type));
+  return candidates.length === response.candidates.length ? response : { candidates, highConfidence: false };
 }
 
 async function setIndexFromRealData(entries: LabelEntry[]): Promise<void> {
@@ -93,7 +128,7 @@ async function setIndexFromRealData(entries: LabelEntry[]): Promise<void> {
   console.log("[STI] index rebuilt:", byType);
 
   const settings = await getSettings();
-  const translationHealth = computeTranslationHealth(entries, settings.activeLanguages);
+  const translationHealth = computeTranslationHealth(entries, settings.activeLanguages, settings.simpleMode);
   await chrome.storage.local.set({
     settings: { ...settings, lastIndexRefresh: Date.now() } satisfies Settings,
     cachedEntries: entries,
@@ -124,21 +159,24 @@ async function loadLabels(pageOrigin: string, pageObjectApiName: string | null |
 
 /**
  * PHASE 6/6b: persists one language's edited value for any editable type (see
- * isEditableLabelType) and folds the change back into the live index — same
+ * isEditableEntry) and folds the change back into the live index — same
  * setIndexFromRealData path a full refresh uses, so the reverse index, the persisted
  * cache, and Translation Health all pick up the edit immediately, with no separate
  * "apply this one edit" logic to keep in sync. Two write mechanisms share this one
  * function: CustomLabel goes through the Tooling API (saveCustomLabelTranslation,
  * fast, synchronous PATCH/POST); everything else goes through a Metadata API deploy()
  * (saveMetadataTranslation, slower, retrieve-then-deploy) — see DECISIONS.md #53.
+ * The editability check needs the full ENTRY, not just labelType (DECISIONS.md #56 —
+ * standard vs. custom fields/picklists need different, not-both-built write paths), so
+ * the entry lookup happens BEFORE the gate now, not after.
  */
 async function saveTranslation(req: SaveTranslationRequest): Promise<SaveTranslationResponse> {
-  if (!isEditableLabelType(req.labelType)) {
-    return { ok: false, error: "This metadata type can't be edited from here yet." };
-  }
   const entry = allEntries.find((e) => e.type === req.labelType && e.apiName === req.apiName);
   if (!entry) {
     return { ok: false, error: "Couldn't find this entry anymore — try refreshing the index." };
+  }
+  if (!isEditableEntry(entry)) {
+    return { ok: false, error: "This metadata type can't be edited from here yet." };
   }
 
   const apiHost = toApiHost(req.origin);
@@ -203,7 +241,8 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
   }
 
   if (message.type === "RESOLVE_TEXT") {
-    const { candidates, highConfidence } = resolveText(reverseIndex, message.text, message.hints);
+    const raw = resolveText(reverseIndex, message.text, message.hints);
+    const { candidates, highConfidence } = applySimpleScope(raw, cachedSettings.simpleMode);
     console.log(
       "[STI] RESOLVE_TEXT:", JSON.stringify(message.text),
       "hints:", JSON.stringify(message.hints),
@@ -215,10 +254,9 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, _sender, sendRes
   }
 
   if (message.type === "RESOLVE_TEXTS_BULK") {
-    const results = message.items.map(({ text, hints }) => {
-      const { candidates, highConfidence } = resolveText(reverseIndex, text, hints);
-      return { candidates, highConfidence } satisfies ResolveTextResponse;
-    });
+    const results = message.items.map(({ text, hints }) =>
+      applySimpleScope(resolveText(reverseIndex, text, hints), cachedSettings.simpleMode)
+    );
     sendResponse({ results } satisfies ResolveTextsBulkResponse);
     return false;
   }
