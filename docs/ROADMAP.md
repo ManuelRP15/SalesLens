@@ -8,24 +8,36 @@
 > Read this in full only when scoping a new Epic or reprioritizing. Otherwise, jump
 > straight to the phase you need via the table below or a heading search.
 
+## Scope: Simple mode vs. Advanced (settled 2026-07-21, DECISIONS.md #56, PRODUCT.md)
+
+The product's DEFAULT surface (hover, Translation Mode, Translation Health) is now
+just objects, fields, picklist values, and Custom Labels — everything else (buttons,
+quick actions, tabs, apps, record types, layout sections, related lists) is real,
+stays built, and is reachable by turning Simple Mode off in the popup, but is no
+longer what a new user sees by default. This changes what "done" means for several
+phases below WITHOUT removing any of the work — PHASE 4/8/9/14's advanced-type
+support and PHASE 6b's WebLink/QuickAction/etc. editing are unaffected code-wise, just
+opt-in now. Read each phase's own status for the current picture; don't assume a phase
+marked "done" before 2026-07-21 is off by default without checking.
+
 ## Status at a glance
 
 | # | Phase | Status | Priority (if pending) |
 |---|---|---|---|
-| 4 | Tooltip productivity actions + reliability | ✅ done | — |
+| 4 | Tooltip productivity actions + reliability | ✅ done (advanced-type actions now opt-in, see Scope above) | — |
 | 5 | Navigation to Setup | ✅ done (CustomLabel URL + custom-field Id-based URL both unverified) | — |
-| 6 | Inline translation editing | ✅ v1 (Custom Labels) + 6b (8 more types via deploy()) done | 6c (ObjectLabel/RelatedList caseValues) pending |
+| 6 | Inline translation editing | ✅ v1 (Custom Labels) + 6b (8 more types via deploy()) done | 6c (ObjectLabel/RelatedList caseValues, global QuickAction) pending |
 | 7 | Standard labels without Translation Workbench | ✅ done | — |
-| 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done, Lens pending | — |
-| 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing) | — |
-| 10 | Translation Health | 🟡 v1 done, QA Report v2 pending | — |
+| 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done (advanced types opt-in), Lens pending | — |
+| 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing; advanced-type badges opt-in); missing/identical-to-source chip signals shipped 2026-07-21 (DECISIONS.md #58) | rest of QA Mode refinement (longer-term Screen Flows) pending |
+| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); rest of QA Report v2 (Duplicated/Broken/Terminology) pending | — |
 | 11 | Language config UI + Quick Compare | ⬜ pending | — |
 | 12 | Advanced Metadata Inspector | ⬜ pending | — |
 | 13 | Smart Search | ⬜ pending | — |
-| 14 | Productivity Actions | 🟡 Copy SOQL/XML done, export pending | — |
+| 14 | Productivity Actions | 🟡 Copy API Name done; Copy SOQL/XML **removed** 2026-07-21 (DECISIONS.md #56 — kept the extension simple per direct product feedback); export pending | — |
 | 15 | Dependency Inspector | ⬜ pending | ⚠️ feasibility unconfirmed |
 | 16 | Workspace / Metadata Basket / package.xml Builder | ⬜ pending | **Muy Alta** |
-| 17 | Keyboard-First Experience | 🟡 Enter-to-edit shipped; save/cancel already worked; navigation + more hotkey config pending | **Muy Alta** |
+| 17 | Keyboard-First Experience | 🟡 Enter-to-edit shipped; save/cancel already worked; hold-vs-toggle hover redesign shipped 2026-07-21 (DECISIONS.md #56); shortcut settings UX simplified + mutual conflict prevention shipped 2026-07-21 (DECISIONS.md #57); arrow-key navigation still pending | **Muy Alta** |
 | 18 | Translation Navigator & Page Coverage | ⬜ pending | Alta |
 | 19 | Hover History & Favorites | ⬜ pending | Alta |
 | 20 | Open in VS Code | ⬜ pending | ⚠️ needs a Native Messaging host — architecture decision first |
@@ -105,6 +117,17 @@ Salesforce's own platform-controlled translations, not admin-authored content).*
 **Real-org UNVERIFIED** — this is a genuine metadata write, confirm on a sandbox org
 before trusting it broadly.
 
+**Narrowed further, 2026-07-21 (`DECISIONS.md #56`): `FieldLabel`/`PicklistValue`
+editing is CUSTOM fields/picklists only, not standard ones.** Real-org testing hit
+Salesforce's own rejections — "Cannot translate standard field: Account.Fax", "Can't
+translate standard picklist Type with Custom Object Translations. Use Standard Value
+Set instead." Standard picklists need an entirely different, unbuilt mechanism
+(`StandardValueSetTranslation`); some standard fields aren't renamable via metadata at
+all. Standard fields/picklists stay fully READABLE via hover (unaffected — that path
+never touches `metadata-write.ts`), just without an edit button until a real
+standard-value-set write path exists (tracked under PHASE 6c alongside
+`ObjectLabel`/`RelatedList`).
+
 Also not in this v1: real-time on-page text replacement after saving (the original spec's
 "live preview") — skipped because editing usually targets a language OTHER than the one
 currently rendered on screen, so there's often no matching on-page text to replace at all,
@@ -118,7 +141,7 @@ instead — see "What works" above.
 - **Pre-save validation**: length limits, special-character/encoding checks, and duplicate-value warnings before the PATCH/POST fires — client-side only, no new API calls; needs the field's actual length constraint (already queryable via `FieldDefinition`, same source as the PHASE 8 Metadata Lens length column) rather than a guessed limit.
 - **Smart Suggestions (bulk apply)**: when the same source value is being edited and the reverse index shows the identical string used as the base value for other entries too, offer "the same translation exists in N other places — apply the same edit there?" as a single-step confirmation, never an automatic bulk edit; only offered across entries of the same `LabelType`+language, to avoid conflating unrelated metadata that merely collides in text (the same discipline as lesson #30's collision handling).
 - **Undo**: this phase's own per-edit undo is superseded by the org-aware **Safe Undo** mechanism in PHASE 16 (Workspace) — don't build a separate local-only undo here; the editor should record every edit into the Workspace as it happens, and Undo is offered from there.
-- **PHASE 6c — `ObjectLabel`/`RelatedList` + global `QuickAction` editing** (added 2026-07-21, deferred out of PHASE 6b): (a) `ObjectLabel`/`RelatedList` need a safe patch-or-refuse strategy for `<caseValues>` when a language has multiple grammatical-case entries (German, Slavic...) — `FieldLabel`/`RecordType` already refuse cleanly via `assertNoGenderedCase` (`metadata-write.ts`) rather than risk corrupting the other cases; the object's own label needs the equivalent, then `RelatedList` (derived from the same node one hop removed) can ride on it. (b) **Global/standard quick actions** (surfaced 2026-07-21 real-org test, `DECISIONS.md #54`): their translations don't live in the object's `CustomObjectTranslation` (they fail deploy with "no QuickAction named X found") — object-specific custom quick actions work today, global ones show a clean "not supported yet" message. Real support needs the seeding to carry a global flag and a real-org-verified global `Translations` `<quickActions>` write path.
+- **PHASE 6c — `ObjectLabel`/`RelatedList` editing, global `QuickAction`, standard field/picklist editing** (added 2026-07-21, deferred out of PHASE 6b): (a) `ObjectLabel`/`RelatedList` need a safe patch-or-refuse strategy for `<caseValues>` when a language has multiple grammatical-case entries (German, Slavic...) — `FieldLabel`/`RecordType` already refuse cleanly via `assertNoGenderedCase` (`metadata-write.ts`) rather than risk corrupting the other cases; the object's own label needs the equivalent, then `RelatedList` (derived from the same node one hop removed) can ride on it. (b) **Global/standard quick actions** (surfaced 2026-07-21 real-org test, `DECISIONS.md #54`): their translations don't live in the object's `CustomObjectTranslation` (they fail deploy with "no QuickAction named X found") — object-specific custom quick actions work today, global ones show a clean "not supported yet" message. Real support needs the seeding to carry a global flag and a real-org-verified global `Translations` `<quickActions>` write path. (c) **Standard field/picklist editing** (surfaced 2026-07-21 real-org test, `DECISIONS.md #56`): standard fields are rejected outright by some Salesforce deploys ("Cannot translate standard field: Account.Fax"), and standard picklists need `StandardValueSetTranslation` — a completely different, unbuilt Metadata API type, not a variant of the existing `CustomObjectTranslation` path. Given Simple Mode's scope decision (see top of file), this is explicitly LOWER priority than 6c's other items — standard fields/picklists are still fully readable, just not editable, and that gap matters less now that the product's default surface centers on exactly these types.
 
 ### PHASE 7 — Standard object/field labels without Translation Workbench (done)
 Originally scoped as "out of scope entirely" — wrong. Real-org feedback ("standard fields always show Unknown Origin") forced a proper investigation, and there IS a metadata-driven source that works regardless of whether Translation Workbench/Rename Tabs and Labels has ever been touched: the **Partner API's `describeSObjects()` call with a `LocaleOptions` header** (`src/shared/describe-api.ts`) — this returns object/field/picklist-value labels translated into ANY language via Salesforce's own out-of-the-box professional translations, independent of the running user's own language and independent of any admin customization. See lessons #16, #21 and #25 below for the full mechanism, the endpoint bug that blocked it entirely until 2026-07-19, and how it combines with the `CustomObjectTranslation`-derived admin overrides from PHASE 4.
@@ -251,19 +274,24 @@ testing found the editor opened and immediately closed itself (~1ms) — a genui
 state-timing bug, root-caused and fixed, see `DECISIONS.md #50`. v4 is now believed
 stable; still needs a real-org click to confirm the fix.
 
-**Future refinement — Translation QA Mode (2026-07-19 product review, ⭐⭐⭐⭐⭐
-potential, the single highest-rated idea in that review):** the pitch is a tester
-saying "check this screen is well translated in French and Dutch" and getting the
-answer in seconds instead of switching languages and comparing by eye. Two concrete
-additions to the existing inline-badge mechanism, both computable from data already in
-the reverse index (no new API calls):
-- Fields with no value for an active language get a visually distinct "missing"
-  treatment on their badge (today, missing languages are silently absent from the
-  badge row — they should stand out instead).
-- A translation whose value is byte-identical to the source/base language gets marked
-  suspicious (a real possible failure mode: someone copy-pasted the source value into
-  the translation field instead of translating it) — configurable, since some short
-  strings (numbers, brand names, acronyms) are identical across languages legitimately.
+**Translation QA Mode (2026-07-19 product review, ⭐⭐⭐⭐⭐ potential, the single
+highest-rated idea in that review) — the first two concrete additions SHIPPED
+2026-07-21 (`DECISIONS.md #58`):**
+- ✅ **Missing-language chips**: a matched entry's badge now renders a chip for EVERY
+  active language, not just the ones with a value — a language with none gets a
+  dashed, dimmed "— missing —" placeholder instead of being silently absent, and is
+  clickable-to-fill-in when the type is editable (reuses the existing empty-value
+  editor path, no new mechanism).
+- ✅ **Identical-to-source flagging**: a translation whose value is byte-identical to
+  the base-language value gets a small "≈" mark — gated by
+  `Settings.flagIdenticalTranslations` (default on), since some short strings
+  (numbers, brand names, acronyms) are identical across languages legitimately and
+  this project's "zero false positives" bar means that needs a real off-switch, not
+  just a flag people learn to ignore.
+- Still open: the tester-facing "check this screen in French and Dutch" summary view
+  itself (today the signals live on individual chips, not yet rolled up into a
+  per-page pass/fail read) — the underlying data is already there, this is a
+  presentation layer on top.
 - Longer-term, extend Translation Mode beyond Lightning Record Pages to **Screen
   Flows**, which have their own translation surface the extension doesn't touch yet.
 
@@ -283,8 +311,12 @@ opened via `chrome.tabs.create` rather than referenced directly in the manifest.
 - The health page reads that + `settings` from storage and renders one row per active
   language (missing count + a coverage bar), expandable into the actual list of
   `apiName (type)` missing that language.
-- Not yet done: "identical to source language" detection and other consistency checks
-  beyond plain missing-ness (still open, see `PRODUCT.md`'s MVP capability #4).
+- ✅ **"Identical to source language" detection shipped 2026-07-21** (`DECISIONS.md
+  #58`, closes `PRODUCT.md`'s MVP capability #4): `TranslationHealthEntry` now also
+  carries `identicalToSourceLanguages`, shown as a "Possibly untranslated" column
+  (hidden when `Settings.flagIdenticalTranslations` is off) with the same expandable
+  per-language detail as Missing. Other consistency checks beyond missing/identical
+  (Duplicated, Broken, Terminology) are still open — see QA Report v2 below.
 
 **Future refinement — QA / Localization Report v2 (2026-07-19 product review,
 ⭐⭐⭐⭐⭐ potential):** extend the current per-language missing-count table with:
@@ -298,10 +330,11 @@ opened via `chrome.tabs.create` rather than referenced directly in the manifest.
 - **Terminology consistency checker** (2026-07-20 roadmap review, backlog idea #14 "AI Consistency Checker" — despite the name, this doesn't require an actual model): flag when the same source term (e.g. "Account", "Save") is translated inconsistently across different entries in the same language (e.g. "Cuenta" in one place, "Cliente" in another) — a clustering/grouping pass over the existing reverse index, not a new data source. Needs a concrete similarity/grouping definition confirmed against real inconsistency examples before implementation, same "don't guess at a heuristic" discipline as the Broken-detection bullet above.
 - **Export** (CSV/JSON) of the report — same underlying need as PHASE 14's export item,
   should share one implementation.
-- This ties directly into "identical to source language" detection above and the
-  Translation QA Mode refinement in PHASE 9 — the per-page inline flagging and the
-  org-wide report should be driven by the same underlying health computation in
-  `background/index.ts`, not two separate implementations.
+- ✅ **Architecture guidance followed**: "identical to source language" above and
+  PHASE 9's chip flagging are driven by the exact same `computeTranslationHealth()`
+  computation in `background/index.ts` (`identicalToSourceLanguages`), not two
+  separate implementations — the per-page chips and the org-wide report read the same
+  underlying signal.
 
 ### PHASE 11 — Language configuration UI + Quick Compare
 Beyond the popup's language checkboxes: user-configurable language order, colors, and
@@ -335,14 +368,16 @@ Translations — anything already present as a `LabelEntry` in the reverse index
 metadata coverage required, this phase is purely a new entry point into data already
 fetched.
 
-### PHASE 14 — Productivity Actions — Copy actions done, export still pending
-Copy API Name (PHASE 4) and Copy Translation (the per-language ⧉ icon, PHASE 4) were
-already shipped. **Copy SOQL and Copy XML Member shipped 2026-07-20** — see
-`DECISIONS.md #48` for exactly which `LabelType`s each covers and why (confident
-Metadata API component mappings only, nothing guessed). **Copy Metadata Name and Copy
-Full Path were deliberately NOT built** — both would copy the identical string Copy API
-Name already does, so they'd have been redundant buttons, not new value (same
-`DECISIONS.md #48` entry).
+### PHASE 14 — Productivity Actions — Copy API Name/Translation done, rest deliberately cut
+Copy API Name (PHASE 4) and Copy Translation (the per-language ⧉ icon, PHASE 4) are the
+two actions that remain. **Copy SOQL and Copy XML Member shipped 2026-07-20, then
+REMOVED 2026-07-21** (`DECISIONS.md #48` for the original build, `#56` for the
+removal) — direct product feedback questioned whether they were pulling their weight
+against the goal of keeping the extension simple, and PHASE 16's future Workspace will
+cover the same underlying need (grab exactly what you touched for a package/manifest)
+automatically rather than as a manual per-row action. **Copy Metadata Name and Copy
+Full Path were never built** — both would copy the identical string Copy API Name
+already does, so they'd have been redundant buttons, not new value (`DECISIONS.md #48`).
 
 Still open: exporting information (CSV/JSON) for a given element or the whole loaded
 index (2026-07-19 product review confirms this as ⭐⭐⭐⭐ — sounds minor, gets used
@@ -481,9 +516,46 @@ moment an editor is focused (PHASE 6's `TranslationEditor` already handled both)
 only real gap was Enter opening the editor in the first place while Inspection Mode is
 on and a tooltip is showing (no click). See `DECISIONS.md #49` for the mechanism
 (`editTrigger` counter prop) and why it's guarded more narrowly than the existing
-inspector/Translation-Mode toggle keys. Still open: arrow-key navigation between
-matches (blocked on PHASE 18's ordered match list) and further hotkey configurability
-(double-press-to-toggle, configurable grace period).
+inspector/Translation-Mode toggle keys.
+
+### PHASE 17 additions — hold-vs-toggle hover redesign shipped (2026-07-21)
+Direct real-org feedback: continuous retargeting on every mouse move (Inspection
+Mode's behavior since lesson #43) made it too easy to accidentally lose a tooltip
+mid-read, and felt unintentional rather than deliberate. **Replaced with two
+independently configurable keys** (`DECISIONS.md #56`):
+- `Settings.inspectorHotkey` (default Alt, unchanged storage key) now TOGGLES a
+  **sticky pin**: press once, the first resolvable element the cursor reaches gets
+  pinned — and STAYS pinned through further mouse movement alone. Only Escape, an
+  outside click, or the hold key below can move or close it.
+- `Settings.holdHotkey` (new, default Shift) is the "Minecraft shift" companion: hold
+  it down for LIVE, zero-debounce retargeting — release to re-pin on whatever's
+  under the cursor at that instant. Works independently of the toggle key, so it also
+  functions as a fully standalone hold-to-peek (lesson #40's original mechanic,
+  reintroduced as a real, permanent second mode rather than superseded).
+- The magnifier cursor now only shows while actively "searching" (hold key held, or
+  toggle mode on with nothing pinned yet) — hidden once something's pinned, in favor
+  of the normal cursor, per direct feedback that it cluttered a tooltip being read.
+- Escape/outside-click now also close a tooltip pinned purely via a standalone hold
+  peek (toggle mode never engaged), which had no way to be dismissed before.
+
+Still open: arrow-key navigation between matches (blocked on PHASE 18's ordered match
+list) and further hotkey configurability (double-press-to-toggle, configurable grace
+period). Real-org UNVERIFIED — this is a genuine interaction-model change, confirm the
+full feel (pin, hold-to-move, magnifier show/hide, both close paths) before trusting it.
+
+### PHASE 17 additions — shortcut settings UX simplified + conflict prevention shipped (2026-07-21)
+Direct real-org feedback on the hold-vs-toggle redesign above: the popup's hotkey
+controls read as confusing (`DECISIONS.md #57`) — disabling Hold to move tooltip's key
+left its recorder displaying "Always on," a placeholder meant for the OTHER setting's
+different null-meaning. Both `inspectorHotkey` and `holdHotkey` now present as a single
+`ShortcutToggleRow` shape: an Enabled/Disabled pill switch + an activation-key recorder
+that's dimmed/inert while disabled, no third "Always" mode implied. Behavior underneath
+is unchanged (disabled `inspectorHotkey` still falls back to classic Always Hover,
+exactly as before) — this was a UI relabel, not a logic change. New: the two shortcuts
+can no longer be set to the same key — `shared/hotkeys.ts`'s `bareKeysConflict` rejects
+the attempt inline with an explanation, and `pickAvailableBareKey` picks a safe
+alternate when a shortcut is re-enabled and its own default would collide with the
+other's current custom key.
 
 ### PHASE 18 — Translation Navigator & Page Coverage
 **Alta priority.** Backlog ideas #5 and #6, grouped together because both are

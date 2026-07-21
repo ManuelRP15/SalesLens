@@ -1,6 +1,6 @@
 import { collectTranslatableTargets, TRANSLATION_MODE_BADGE_ATTR } from "./dom-utils";
 import { langAccent, langHue } from "./tooltip-constants";
-import { isEditableLabelType, type ContextHints, type LabelEntry, type ResolveTextsBulkResponse, type TmPreset } from "../shared/types";
+import { isEditableEntry, type ContextHints, type LabelEntry, type ResolveTextsBulkResponse, type TmPreset } from "../shared/types";
 
 /** Fired when the user clicks an editable chip — content/index.tsx opens the same editor the hover tooltip uses, anchored at (x, y). */
 export type TmEditRequestHandler = (entry: LabelEntry, language: string, x: number, y: number) => void;
@@ -16,9 +16,14 @@ export interface TmStyle {
   preset: TmPreset;
   showFlags: boolean;
   showLangCodes: boolean;
+  /** Mark chips whose value is byte-identical to the base-language value — see `Settings.flagIdenticalTranslations`. */
+  flagIdentical: boolean;
 }
 
-const DEFAULT_TM_STYLE: TmStyle = { preset: "stacked", showFlags: true, showLangCodes: true };
+const DEFAULT_TM_STYLE: TmStyle = { preset: "stacked", showFlags: true, showLangCodes: true, flagIdentical: true };
+
+/** Base/source language — same existing assumption as `metadata-translations.ts`'s `BASE_LANG` / `salesforce-api.ts`'s `CUSTOM_LABEL_BASE_LANGUAGE` (DECISIONS.md #41). */
+const BASE_LANG = "en_US";
 
 let isRunning = false;
 let currentActiveLanguages: string[] = [];
@@ -35,7 +40,10 @@ let observedShadowRoots = new WeakSet<ShadowRoot>();
 interface BadgeTranslation {
   lang: string;
   value: string;
-  customized: boolean;
+  /** No value at all for this active language — rendered as a distinct, dimmed placeholder instead of being silently omitted from the badge (PHASE 9 QA idea, ROADMAP.md). */
+  missing?: boolean;
+  /** Value is byte-identical to the base-language value — a possible "never actually translated" case, marked only when `TmStyle.flagIdentical` is on. */
+  identical?: boolean;
 }
 
 const CHIP_BASE_CSS =
@@ -89,13 +97,15 @@ function buildLangDot(lang: string): HTMLSpanElement {
  * the layout sideways; "subtle"/"tinted" are inline pills; "plain" is inline
  * text. The previous purple rectangles were rejected in real-org testing.
  *
- * Editable entries (CustomLabel only, same rule as the hover tooltip) get a clickable
+ * Editable entries (`isEditableEntry`, same rule as the hover tooltip) get a clickable
  * chip: a trailing "✏" plus a pointer cursor, opening the SAME edit UI the hover
  * tooltip uses (via onEditRequest → content/index.tsx's openTmEditor) rather than a
- * second, separately-built editing implementation living in raw DOM here.
+ * second, separately-built editing implementation living in raw DOM here. A "missing"
+ * chip (no value at all for that language) is clickable too when editable — same
+ * editor, just starting from an empty value.
  */
 function buildBadge(entry: LabelEntry, translations: BadgeTranslation[], style: TmStyle): HTMLSpanElement {
-  const editable = isEditableLabelType(entry.type) && Boolean(currentOnEditRequest);
+  const editable = isEditableEntry(entry) && Boolean(currentOnEditRequest);
   const badge = document.createElement("span");
   badge.setAttribute(TRANSLATION_MODE_BADGE_ATTR, "true");
   const isStacked = style.preset === "stacked";
@@ -109,7 +119,7 @@ function buildBadge(entry: LabelEntry, translations: BadgeTranslation[], style: 
       "vertical-align:baseline;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;" +
       "font-style:normal;font-weight:400;text-decoration:none;";
 
-  translations.forEach(({ lang, value, customized }, i) => {
+  translations.forEach(({ lang, value, missing, identical }, i) => {
     if (style.preset === "plain" && i > 0) {
       const sep = document.createElement("span");
       sep.textContent = "·";
@@ -117,13 +127,25 @@ function buildBadge(entry: LabelEntry, translations: BadgeTranslation[], style: 
       badge.appendChild(sep);
     }
 
+    // A missing value is still clickable-to-edit when the type is editable (the
+    // editor already handles an empty starting value — see Tooltip.tsx's
+    // CandidateBlock, `entry.valuesByLang[lang] ?? ""`), so this doubles as the
+    // "fill in a missing translation" entry point Translation Mode never had before.
+    // Only a PRESENT value gets the pencil mark, though — an empty chip is already
+    // visually an invitation to click, and a pencil next to "— missing —" read oddly.
+    const clickable = editable;
     const chip = document.createElement("span");
-    chip.style.cssText = chipCss(style.preset, lang) + (editable ? "cursor:pointer;" : "");
-    chip.title = editable
-      ? `${lang} — click to edit`
-      : customized
-        ? `${lang} — customized (Translation Workbench / Rename Tabs and Labels)`
-        : lang;
+    chip.style.cssText =
+      chipCss(style.preset, lang) + (clickable ? "cursor:pointer;" : "") + (missing ? "opacity:.6;border-style:dashed;" : "");
+    chip.title = missing
+      ? editable
+        ? `${lang} — no translation yet, click to add one`
+        : `${lang} — no translation yet`
+      : identical
+        ? `${lang} — identical to the source language, might not be translated`
+        : editable
+          ? `${lang} — click to edit`
+          : lang;
 
     if (style.showFlags) chip.appendChild(buildLangDot(lang));
     if (style.showLangCodes) {
@@ -133,20 +155,24 @@ function buildBadge(entry: LabelEntry, translations: BadgeTranslation[], style: 
       chip.appendChild(code);
     }
     const text = document.createElement("span");
-    text.textContent = value;
+    text.textContent = missing ? "— missing —" : value;
+    if (missing) text.style.cssText = "font-style:italic;";
     chip.appendChild(text);
 
-    if (customized) {
-      const mark = document.createElement("span");
-      mark.textContent = "✎";
-      mark.style.cssText = "color:#7c3aed;font-size:9px;margin-left:2px;";
-      chip.appendChild(mark);
+    if (identical && !missing) {
+      const warn = document.createElement("span");
+      warn.textContent = "≈";
+      warn.style.cssText = "color:#b8860b;font-size:10px;margin-left:1px;";
+      chip.appendChild(warn);
     }
-    if (editable) {
+
+    if (clickable && !missing) {
       const pencil = document.createElement("span");
       pencil.textContent = "✏";
       pencil.style.cssText = "color:#1a56db;font-size:9px;margin-left:2px;opacity:.7;";
       chip.appendChild(pencil);
+    }
+    if (clickable) {
       // A chip is a real child of an arbitrary Salesforce element (a table cell, a
       // button, a link...) — without stopping propagation, a click here would ALSO
       // fire whatever the parent's own click behavior is (navigate, submit, toggle).
@@ -215,10 +241,20 @@ async function scan() {
         response.results.forEach((result, i) => {
           if (result.candidates.length === 0) return;
           const entry = result.candidates[0];
-          const translations: BadgeTranslation[] = currentActiveLanguages
-            .map((lang) => ({ lang, value: entry.valuesByLang[lang], customized: Boolean(entry.customizedLanguages?.includes(lang)) }))
-            .filter((t): t is BadgeTranslation => Boolean(t.value));
-          if (translations.length === 0) return;
+          // Skip the element entirely if NONE of the active languages have anything —
+          // avoids injecting an all-"missing" badge on elements the user's active
+          // languages simply don't cover at all (still real noise, unlike a partial
+          // gap on an otherwise-translated entry, which the "missing" chip below now
+          // surfaces instead of silently dropping).
+          const hasAnyValue = currentActiveLanguages.some((lang) => Boolean(entry.valuesByLang[lang]));
+          if (!hasAnyValue) return;
+          const baseValue = entry.valuesByLang[BASE_LANG];
+          const translations: BadgeTranslation[] = currentActiveLanguages.map((lang) => {
+            const value = entry.valuesByLang[lang];
+            if (!value) return { lang, value: "", missing: true };
+            const identical = currentStyle.flagIdentical && lang !== BASE_LANG && value === baseValue;
+            return { lang, value, identical };
+          });
           const element = targets[i].element;
           matchedElements.add(element);
           upsertBadge(element, entry, translations);

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { isEditableLabelType, type LabelEntry, type SaveTranslationResponse } from "../shared/types";
-import { TYPE_COLORS, copySoql, copyXmlMember, displayApiName, langAccent, setupPath, typeLabel } from "./tooltip-constants";
+import { isEditableEntry, type LabelEntry, type SaveTranslationResponse } from "../shared/types";
+import { TYPE_COLORS, displayApiName, langAccent, setupPath, typeLabel } from "./tooltip-constants";
 
 interface TooltipProps {
   text: string;
@@ -96,30 +96,6 @@ function CopyButton({ value, title = "Copy API Name" }: { value: string; title?:
       }}
     >
       {copied ? "✓ Copied" : "Copy"}
-    </button>
-  );
-}
-
-/** Small labeled variant for secondary copy actions (Copy SOQL, Copy XML Member) — lighter weight than CopyButton, more identifiable than an icon alone since there's no obvious single glyph for "SOQL" or "XML member". */
-function CopySmallButton({ value, label, title }: { value: string; label: string; title: string }) {
-  const [copied, setCopied] = useState(false);
-
-  return (
-    <button
-      type="button"
-      className="sti-copy-small-btn"
-      title={title}
-      aria-label={title}
-      onClick={async (e) => {
-        e.stopPropagation();
-        const ok = await copyToClipboard(value);
-        if (ok) {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
-        }
-      }}
-    >
-      {copied ? "✓" : label}
     </button>
   );
 }
@@ -268,10 +244,8 @@ function CandidateBlock({
   cancelTrigger?: number;
 }) {
   const colors = TYPE_COLORS[entry.type];
-  const editable = isEditableLabelType(entry.type);
+  const editable = isEditableEntry(entry);
   const setupHref = setupPath(entry);
-  const soql = copySoql(entry);
-  const xmlMember = copyXmlMember(entry);
 
   // Edits land here first so this specific tooltip instance reflects them
   // immediately; the background's own index is already the source of truth for
@@ -423,15 +397,12 @@ function CandidateBlock({
         {entry.dataType && <span className="sti-field-type">{entry.dataType}</span>}
         <code className="sti-tooltip__apiname" title={entry.apiName}>{displayApiName(entry)}</code>
         <CopyButton value={entry.apiName} />
-        {soql && <CopySmallButton value={soql} label="SOQL" title="Copy a SELECT for this metadata row" />}
-        {xmlMember && <CopySmallButton value={xmlMember} label="XML" title="Copy a package.xml <types> block for this component" />}
       </div>
       {conflictNotice && <div className="sti-conflict-notice">{conflictNotice}</div>}
       {langCodes.length > 0 ? (
         <ul className="sti-tooltip__translations">
           {langCodes.map((lang) => {
             const value = valuesByLang[lang] ?? "";
-            const isCustomized = entry.customizedLanguages?.includes(lang);
             const isEditingThis = editingLang === lang;
             return (
               <li key={lang}>
@@ -450,11 +421,6 @@ function CandidateBlock({
                   <>
                     <span className={`sti-lang-value${value ? "" : " sti-lang-value--empty"}`}>
                       {value || "—"}
-                      {isCustomized && (
-                        <span className="sti-customized-mark" title="Customized (Translation Workbench / Rename Tabs and Labels)">
-                          ✎
-                        </span>
-                      )}
                     </span>
                     <span className="sti-lang-actions">
                       {value && <CopyIconButton value={value} title={`Copy ${lang} value`} />}

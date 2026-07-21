@@ -28,7 +28,7 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 
 | File | Responsibility |
 |---|---|
-| `types.ts` | Every shared type: `LabelEntry`, `LabelType`, `Settings`, all `chrome.runtime` message request/response shapes, `isEditableLabelType()`. |
+| `types.ts` | Every shared type: `LabelEntry`, `LabelType`, `Settings`, all `chrome.runtime` message request/response shapes, `isEditableLabelType()`/`isEditableEntry()` (field-level editability), `isInSimpleScope()` (Simple Mode, `#56`). |
 | `normalize.ts` | Text normalization (`normalizeText`/`normalizeTextLoose`) used to build and query the reverse index. |
 | `index-builder.ts` | `buildReverseIndex()` + `resolveText()` — the disambiguation funnel. The single most important algorithm in the project; always returns 0 or 1 candidates, never a list (`DECISIONS.md #28`). |
 | `index-builder.test.ts` | Unit tests for the funnel above — no Chrome/Salesforce dependency. |
@@ -41,6 +41,8 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 | `describe-api.ts` | Partner API SOAP client (`describeSObjects` + `LocaleOptions`, `describeLayout` via REST): Salesforce's own standard/default translations, independent of any org customization. |
 | `platform-labels.ts` | Curated built-in catalog of standard Salesforce platform UI strings (buttons, tabs) in es/fr/nl_NL — legitimate ONLY because these are Salesforce's own translations, identical in every org (`DECISIONS.md #37`). Never add anything admin-authored here. |
 | `mock-data.ts` | Sample `LabelEntry[]` used when there's no real org session (dev/no-`sid` fallback). |
+| `hotkeys.ts` | `normalizeBareKey`/`bareKeysConflict`/`pickAvailableBareKey` — comparison logic shared by the popup's conflict-checked hotkey recorders (`inspectorHotkey`/`holdHotkey`) and `content/index.tsx`'s live keydown matching, so "the same key" means one thing everywhere (`DECISIONS.md #57`). |
+| `hotkeys.test.ts` | Unit tests for the above — no Chrome dependency. |
 
 ### `src/content/` — injected into `*.lightning.force.com/*` pages
 
@@ -50,21 +52,21 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 | `dom-utils.ts` | `deepElementFromPoint`/`extractOwnText` (hover), `resolveFieldContext`/`resolveSurfaceContext` (DOM-structure disambiguation hints), `collectTranslatableTargets` (Translation Mode's full-tree scan). |
 | `Tooltip.tsx` | The tooltip React component — display, inline Custom Label editor, Copy buttons, reports its own rect via `onRectChange` for the hover-ownership zone. |
 | `tooltip.css` | Styles injected into the closed Shadow DOM. |
-| `tooltip-constants.ts` | `TYPE_LABELS`/`TYPE_COLORS`/`langAccent`/`displayApiName` — shared visual language between `Tooltip.tsx` and `translation-mode.tsx`. Also `setupPath`/`copySoql`/`copyXmlMember` — per-type generators for the tooltip's Setup-navigation and Copy SOQL/XML actions (PHASE 5/14), each returning `null` rather than guessing when a type has no confident mapping. |
-| `translation-mode.tsx` | Translation Mode: bulk DOM scan, `RESOLVE_TEXTS_BULK`, inline translation chips appended directly to matched elements (real DOM injection, fully reversible on toggle-off). |
+| `tooltip-constants.ts` | `TYPE_LABELS`/`TYPE_COLORS`/`langAccent`/`displayApiName` — shared visual language between `Tooltip.tsx` and `translation-mode.tsx`. Also `setupPath` — per-type Setup-navigation URL generator (PHASE 5), returning `null` rather than guessing when a type has no confident mapping. (Copy SOQL/XML Member were removed entirely in `#56`.) |
+| `translation-mode.tsx` | Translation Mode: bulk DOM scan, `RESOLVE_TEXTS_BULK`, inline translation chips appended directly to matched elements (real DOM injection, fully reversible on toggle-off) — including distinct dashed "missing" chips and "≈ identical to source" marks (`DECISIONS.md #58`). |
 
 ### `src/background/` — the MV3 service worker
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`), Translation Health computation. |
+| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`), Translation Health computation (`missingLanguages` + `identicalToSourceLanguages`, `DECISIONS.md #58`). |
 
 ### `src/popup/` and `src/health/` — extension UI surfaces
 
 | File | Responsibility |
 |---|---|
-| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (hotkey recorder), Display settings, refresh button, link to Translation Health. |
-| `health/Health.tsx` | Dedicated page (`chrome.tabs.create`): per-language missing-translation table, computed by the background on every index refresh. |
+| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (`ShortcutToggleRow` — Enabled/Disabled + conflict-checked key recorder for `inspectorHotkey`/`holdHotkey`, `DECISIONS.md #57`), Display settings (incl. `flagIdenticalTranslations`), refresh button, link to Translation Health. |
+| `health/Health.tsx` | Dedicated page (`chrome.tabs.create`): per-language Missing + Possibly-untranslated (identical-to-source) tables, computed by the background on every index refresh. |
 | `popup/main.tsx`, `health/main.tsx`, `*/index.html` | Standard React mount points — no logic. |
 
 ### Root config
@@ -141,18 +143,22 @@ real debugging session at least once (see the linked `DECISIONS.md` entry).
    Metadata API only ever returns the *translated* value; the base value needs its own
    tightly-scoped Tooling/REST query, limited to exactly the API names already
    discovered via `listMetadata` (`#9`).
-8. **Editing has two write mechanisms behind one gate (`isEditableLabelType()`,
-   `types.ts`).** Custom Label translations are standalone Tooling API records
-   (PATCH/POST-able individually, `salesforce-api.ts`). Every other editable type's
-   translation lives inside a `CustomObjectTranslation`/`Translations`/
-   `GlobalValueSetTranslation` XML file, written via a Metadata API `deploy()`
-   (`metadata-write.ts`, PHASE 6b, `#41`, `#53`). **`ObjectLabel`/`RelatedList` stay
-   non-editable** — their target (`<caseValues>`) can hold multiple grammatical-case
-   entries for gendered languages, not yet safely patchable — and
+8. **Editing has two write mechanisms behind one gate — `isEditableEntry()`,
+   `types.ts`, not just `isEditableLabelType()`.** Custom Label translations are
+   standalone Tooling API records (PATCH/POST-able individually, `salesforce-api.ts`).
+   Every other editable type's translation lives inside a `CustomObjectTranslation`/
+   `Translations`/`GlobalValueSetTranslation` XML file, written via a Metadata API
+   `deploy()` (`metadata-write.ts`, PHASE 6b, `#41`, `#53`). **`ObjectLabel`/
+   `RelatedList` stay non-editable** — their target (`<caseValues>`) can hold multiple
+   grammatical-case entries for gendered languages, not yet safely patchable — and
    **`StandardButton`/`StandardTab` are PERMANENTLY non-editable**, not a pipeline
    gap: they're Salesforce's own platform-controlled translations, there is no
-   admin-authored value to write back to. Don't add a type to `EDITABLE_LABEL_TYPES`
-   without a real write path backing it.
+   admin-authored value to write back to. **`FieldLabel`/`PicklistValue` are editable
+   for CUSTOM (`__c`) instances only** (`#56`) — real Salesforce rejections confirmed
+   standard fields/picklists need a different, unbuilt mechanism
+   (`StandardValueSetTranslation` for picklists); this is why `isEditableEntry()`
+   takes the full `LabelEntry`, not just its `type`. Don't add a type/case to the
+   editable set without a real write path backing it.
 9. **Every translation write does optimistic concurrency control** — re-read the live
    org value immediately before writing, abort (don't overwrite) on mismatch (`#42`).
    Non-negotiable for any future write path too, not just this one.

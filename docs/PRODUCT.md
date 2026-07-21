@@ -52,8 +52,12 @@ to real user feedback instead of a fixed master plan.
 4. **Translation Health** — automatically analyze translation quality: untranslated
    languages, empty translations, translations identical to the source language
    (configurable), possible inconsistencies. Show discreet visual warnings.
-   *Status: basic missing-translation highlighting in the tooltip added in PHASE 4.
-   Org-wide/aggregate health analysis is still open (see PHASE 10).*
+   *Status: missing-translation highlighting (tooltip since PHASE 4, distinct
+   "missing" chips in Translation Mode + org-wide health table since PHASE 9/10) and
+   identical-to-source-language detection (configurable via
+   `Settings.flagIdenticalTranslations`) both shipped 2026-07-21 (DECISIONS.md #58).
+   Other consistency checks (duplicated values, broken/truncated text) still open,
+   see ROADMAP.md PHASE 10's QA Report v2.*
 
 5. **Language configuration** — each user can choose their primary languages, their
    order, colors, icons, and compact vs. expanded mode; the extension remembers these
@@ -116,6 +120,23 @@ architect would actively recommend to a colleague:
    every injected node the moment the mode is toggled off (see
    `src/content/translation-mode.tsx`). Any future DOM-injecting feature must keep that
    same guarantee: toggle off → zero residue.
+
+### Core metadata scope — Simple mode (settled 2026-07-21, DECISIONS.md #56)
+The product's actual day-to-day value lives in **objects, fields (standard and custom),
+picklist values, and Custom Labels** — that's where a translator or developer is
+actually looking when they're chasing a translation gap. Buttons, quick actions, tabs,
+apps, record types, and layout sections are real and stay fully built, but they carry
+disproportionate edge-case risk for how rarely they're the actual thing someone's
+hunting for (global-vs-object-specific quick actions, standard-vs-custom picklist
+write mechanisms, platform-controlled strings with no admin value to show at all).
+**"Simple mode" (default ON) is the product's default surface** — hover, Translation
+Mode, and Translation Health only show the core four types unless the user explicitly
+opts into "Advanced" (a single toggle, not a matrix of per-type switches — matching the
+"never dump options just because available" restraint below). This is a scope decision
+about what's DEFAULT, not what's BUILT: nothing already shipped gets removed, it's
+just not the first thing a new user sees. Depth over breadth, explicitly — see the
+Success Metric framing in the top-level session instructions this project now runs
+under: closed Epics and reduced technical debt over raw feature count.
 
 ### Positioning
 The extension should **not** be pitched as "open Setup faster." The sharper framing,
