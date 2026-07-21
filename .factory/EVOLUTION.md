@@ -59,6 +59,49 @@ run-1 failure again, not progress.
 
 ---
 
+## Run 2 retrospective — ghost progress (V1.2)
+
+Run 2 (Translation Health v2) passed its gates, merged on GitHub, and was reported
+complete — while the owner's local project directory contained none of it, and the real
+local product tip (~2,400 uncommitted lines of `#63`) sat unmanaged in the working tree.
+The owner ordered a full state reset (`docs/DECISIONS.md #64`) and retired the epic.
+
+**Root cause (orchestration, not implementation):** the factory defined delivery in Git
+terms (commits, PR, merge) instead of product terms (present in the tree the owner runs).
+A separate worktree became both the working and the delivery location; no gate ever asked
+*"is this in the owner's actual project?"* — G-PO v1.1 even accepted "worktree" as an
+answer to "where does the user run it".
+
+**Fixes (V1.2, all landed):**
+- `METHODOLOGY.md §0` — mandatory session-start CURRENT-PRODUCT-STATE reconciliation
+  (local dir, branch, working-tree content, does it run, roadmap state, next work).
+- Delivery redefined: present + machine-verified in the **active local checkout**; side
+  worktrees are a rare exception and never a delivery location; G-PO's "runnable
+  artifact" must be the local tree. `MANIFESTO.md` non-negotiable #0.
+- Uncommitted local changes are PRODUCT STATE — reconciled first, never bypassed.
+
+**What went well, kept:** the archive-tag + revert pattern retired the epic without losing
+reusable work (`archive/translation-health-v2` preserves the duplicate-detection module +
+tests + preview harness); the run-1 G-PO preview-harness pattern remains valid.
+
+**Standing discipline promoted from this run (owner instruction):**
+- **After each substantial epic, a SHORT retrospective here** — what went well / what
+  failed / what was token-expensive / which verification earned its place / which didn't.
+  Promote a lesson into methodology only when it is a reusable principle, not a one-off.
+- **Don't self-modify the factory on every wobble.** First solve the product problem;
+  then classify the failure (implementation bug / verification gap / context problem /
+  orchestration problem / methodology problem) and change methodology only for the
+  genuinely systemic class. Evidence over reflex; small targeted amendments over
+  architectural expansion.
+- **Full priority order (fixed):** correct product outcome > UX & product quality >
+  verification & regression safety > architecture & maintainability > documentation >
+  Git/GitHub hygiene > token efficiency. Each matters; conflicts resolve upward.
+- **Never confuse activity with progress:** commits, agents, reports, and tokens are
+  cost, not output. The only measure is what the user can now do better, visible in the
+  real local product.
+
+---
+
 ## V1 — Orchestrated development (this version) ✅
 
 **What it is:** a single human entry point (`/factory`), risk-based routing, explicit

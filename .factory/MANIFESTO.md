@@ -61,6 +61,14 @@ question that stops the line is a success, not a failure.
 
 ## The factory's own non-negotiables
 
+0. **The local project directory is the product; GitHub is backup + collaboration around
+   it.** (V1.2 — the run-2 lesson, `docs/DECISIONS.md #64`.) All implementation and
+   verification happen in the owner's active local checkout; delivery means the change is
+   present, machine-verified, and runnable THERE. A branch, worktree, or PR the owner
+   isn't running is staging, never delivery. Git/PR automation supports this loop — it
+   must never substitute for it, and the orchestration must never become more complex
+   than the software it builds. Every session starts by reconciling CURRENT PRODUCT
+   STATE (`METHODOLOGY.md §0`).
 1. **Never claim real-world verification the factory didn't perform.** Machine checks
    (typecheck / unit / build / harness) are the factory's to close. Anything requiring a
    live external system (here: a real Salesforce org) is handed to the human as an exact

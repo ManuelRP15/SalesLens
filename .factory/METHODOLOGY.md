@@ -7,6 +7,36 @@
 
 ---
 
+## 0. Session start — reconcile CURRENT PRODUCT STATE (V1.2)
+
+The factory's second run produced **ghost progress**: an epic merged on GitHub and
+reported complete while the owner's actual local project never changed, and the real
+local tip sat uncommitted (`docs/DECISIONS.md #64`). This section exists so that can
+never happen again.
+
+**The local project directory is the product.** GitHub is version control + backup around
+it. Before any work, the orchestrator establishes — with commands, not assumptions:
+
+1. **Local directory** — the active local checkout (the adapter names it).
+2. **Branch / worktree** — what is checked out THERE; divergence from origin noted.
+3. **Working tree content** — uncommitted changes are PRODUCT STATE, never noise; never
+   clobber, bypass, or build around them without understanding what they are.
+4. **What runs** — does the current tree pass G2 (typecheck / tests / build)?
+5. **Roadmap state** — `CURRENT_STATE.md` first, then route per the adapter.
+6. **Next intended work** — stated in one sentence before starting.
+
+**Worktree policy (V1.2):** work happens directly in the active local checkout, on a
+branch. A separate worktree is a rare exception for genuine parallel isolation, and it is
+NEVER the delivery location: a task that used one is not done until its result is
+integrated into the active local checkout, verified there, and reported as such.
+
+**Delivery (amends G6 and G-PO):** "done" requires the change present in the active local
+working tree — committed on the branch the owner will actually run — with push/PR as the
+backup layer around it. A green PR that the local tree does not contain is the run-2
+failure, not progress.
+
+---
+
 ## 1. Risk tiers — how much process
 
 Every task is classified into exactly one tier **before** work starts. The tier decides
@@ -208,7 +238,8 @@ gate, not from the top.
 - **Report a user-facing task DONE without closing G-PO** — a demonstrated, reachable,
   observable outcome. Green machine gates are not a substitute (the run-1 failure).
 - **Leave a user-facing change stranded** on an unmerged / unbuilt / un-run branch and call
-  it delivered. "Where can the user see it?" must have a concrete answer.
+  it delivered. "Where can the user see it?" must have a concrete answer — and that answer
+  must be **the active local checkout** (§0), never a side worktree or a GitHub-only branch.
 - **Choose a low-visibility epic because its core is easy to unit-test.** That optimizes for
   what the factory can prove over what the user can feel (run-1 lesson). If the best framing
   of an epic is "one more column on a secondary page," scope it up to a visible outcome or
