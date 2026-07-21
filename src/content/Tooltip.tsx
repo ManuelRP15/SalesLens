@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { isEditableEntry, type LabelEntry, type SaveTranslationResponse } from "../shared/types";
+import { BASE_LANGUAGE, isEditableEntry, type LabelEntry, type SaveTranslationResponse } from "../shared/types";
 import { TYPE_COLORS, displayApiName, langAccent, setupPath, typeLabel } from "./tooltip-constants";
 
 interface TooltipProps {
@@ -9,6 +9,8 @@ interface TooltipProps {
   /** Always 0 or 1 entries — see resolveText in index-builder.ts; this project never shows a "N possible origins" list. */
   candidates: LabelEntry[];
   activeLanguages: string[];
+  /** Mark a value identical to the base-language value with a small "≈" hint — mirrors Translation Mode/Health's own signal (`Settings.flagIdenticalTranslations`), so the same soft warning reads consistently everywhere translations are shown. Defaults to on (matches the setting's own default) so callers that don't thread it through yet degrade to the common case rather than silently losing the signal. */
+  flagIdentical?: boolean;
   onSaveTranslation?: (
     entry: LabelEntry,
     language: string,
@@ -229,6 +231,7 @@ function TranslationEditor({ initialValue, status, errorMessage, onSave, onCance
 function CandidateBlock({
   entry,
   activeLanguages,
+  flagIdentical = true,
   onSaveTranslation,
   onEditingActiveChange,
   autoEditLanguage,
@@ -237,6 +240,7 @@ function CandidateBlock({
 }: {
   entry: LabelEntry;
   activeLanguages: string[];
+  flagIdentical?: boolean;
   onSaveTranslation?: TooltipProps["onSaveTranslation"];
   onEditingActiveChange?: TooltipProps["onEditingActiveChange"];
   autoEditLanguage?: string;
@@ -289,16 +293,16 @@ function CandidateBlock({
     return () => onEditingActiveChange?.(false);
   }, [editingLang, onEditingActiveChange]);
 
-  // Non-editable types keep the original behavior exactly: only languages that
-  // already have a recorded value show up as a row (PHASE 4's deliberate "no
-  // per-row missing-translation clutter" decision — see Translation Health instead).
-  // Editable types show every ACTIVE language, including ones with no value yet,
-  // because for them a "missing" row is no longer just a warning — it's something
-  // the user can act on directly, one click away.
-  const langCodes =
-    editable && activeLanguages.length > 0
-      ? activeLanguages
-      : Object.keys(valuesByLang).filter((lang) => activeLanguages.length === 0 || activeLanguages.includes(lang));
+  // Every active language gets a row, present or not (Quick Compare, DECISIONS.md
+  // #59) — PHASE 4's original "only show languages that already have a value"
+  // behavior for non-editable types silently hid the exact gap Translation Health
+  // and Translation Mode's own "missing" chips (#58) now surface elsewhere, which
+  // made the hover tooltip — the PRIMARY inspection surface — the one place still
+  // pretending nothing was missing. Editable types already showed every active
+  // language (a missing one is directly actionable, one click away); non-editable
+  // ones now do too, just without an edit affordance on the empty ones.
+  const langCodes = activeLanguages.length > 0 ? activeLanguages : Object.keys(valuesByLang);
+  const baseValue = valuesByLang[BASE_LANGUAGE];
 
   function startEdit(lang: string) {
     if (editStatus === "saving") return;
@@ -403,6 +407,13 @@ function CandidateBlock({
         <ul className="sti-tooltip__translations">
           {langCodes.map((lang) => {
             const value = valuesByLang[lang] ?? "";
+            const missing = !value;
+            // A value that matches the base language is only worth flagging for a
+            // language that ISN'T the base itself, and only once there's an actual
+            // base value to compare against (some entries have none in the active
+            // set at all) — same computation Translation Mode/Health already apply.
+            const identical =
+              flagIdentical && !missing && lang !== BASE_LANGUAGE && baseValue !== undefined && value === baseValue;
             const isEditingThis = editingLang === lang;
             return (
               <li key={lang}>
@@ -419,8 +430,12 @@ function CandidateBlock({
                   />
                 ) : (
                   <>
-                    <span className={`sti-lang-value${value ? "" : " sti-lang-value--empty"}`}>
-                      {value || "—"}
+                    <span
+                      className={`sti-lang-value${missing ? " sti-lang-value--empty" : ""}`}
+                      title={identical ? "Identical to the source language — might not be translated" : undefined}
+                    >
+                      {missing ? (editable ? "—" : "Not translated") : value}
+                      {identical && <span className="sti-identical-mark">≈</span>}
                     </span>
                     <span className="sti-lang-actions">
                       {value && <CopyIconButton value={value} title={`Copy ${lang} value`} />}
@@ -452,7 +467,7 @@ function CandidateBlock({
   );
 }
 
-export function Tooltip({ text, x, y, candidates, activeLanguages, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage, editTrigger, cancelTrigger }: TooltipProps) {
+export function Tooltip({ text, x, y, candidates, activeLanguages, flagIdentical, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage, editTrigger, cancelTrigger }: TooltipProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ left: x + 12, top: y + 16 });
 
@@ -492,6 +507,7 @@ export function Tooltip({ text, x, y, candidates, activeLanguages, onSaveTransla
           key={entry.apiName + entry.type}
           entry={entry}
           activeLanguages={activeLanguages}
+          flagIdentical={flagIdentical}
           onSaveTranslation={onSaveTranslation}
           onEditingActiveChange={onEditingActiveChange}
           autoEditLanguage={autoEditLanguage}

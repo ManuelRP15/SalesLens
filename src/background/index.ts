@@ -3,7 +3,7 @@ import { MOCK_LABEL_ENTRIES } from "../shared/mock-data";
 import { fetchAllTranslations, saveCustomLabelTranslation, toApiHost } from "../shared/salesforce-api";
 import { fetchMetadataTranslationEntries } from "../shared/metadata-translations";
 import { saveMetadataTranslation } from "../shared/metadata-write";
-import { isEditableEntry, isInSimpleScope } from "../shared/types";
+import { BASE_LANGUAGE, isEditableEntry, isInSimpleScope } from "../shared/types";
 import type {
   ResolveTextRequest,
   ResolveTextResponse,
@@ -33,16 +33,6 @@ const DEFAULT_SETTINGS: Settings = {
   simpleMode: true,
   flagIdenticalTranslations: true,
 };
-
-/**
- * Base/source language every entry is seeded from — same assumption already made by
- * `metadata-translations.ts`'s own `BASE_LANG` and `salesforce-api.ts`'s
- * `CUSTOM_LABEL_BASE_LANGUAGE` (DECISIONS.md #41: untested against a non-English-base
- * org). Kept as its own local constant here rather than importing either of those
- * module-internal ones, matching how this codebase already duplicates this exact value
- * rather than threading a shared import through unrelated modules.
- */
-const HEALTH_BASE_LANG = "en_US";
 
 let reverseIndex: ReverseIndex = buildReverseIndex(MOCK_LABEL_ENTRIES);
 // Same entries the reverse index was built from, kept as a flat list too — the index
@@ -118,13 +108,13 @@ function computeTranslationHealth(entries: LabelEntry[], languages: string[], si
   return entries
     .filter((entry) => !simpleMode || isInSimpleScope(entry.type))
     .map((entry) => {
-      const baseValue = entry.valuesByLang[HEALTH_BASE_LANG];
+      const baseValue = entry.valuesByLang[BASE_LANGUAGE];
       return {
         apiName: entry.apiName,
         type: entry.type,
         missingLanguages: languages.filter((lang) => !entry.valuesByLang[lang]),
         identicalToSourceLanguages: baseValue
-          ? languages.filter((lang) => lang !== HEALTH_BASE_LANG && entry.valuesByLang[lang] === baseValue)
+          ? languages.filter((lang) => lang !== BASE_LANGUAGE && entry.valuesByLang[lang] === baseValue)
           : [],
       };
     });

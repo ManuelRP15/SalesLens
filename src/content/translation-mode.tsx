@@ -1,6 +1,13 @@
 import { collectTranslatableTargets, TRANSLATION_MODE_BADGE_ATTR } from "./dom-utils";
 import { langAccent, langHue } from "./tooltip-constants";
-import { isEditableEntry, type ContextHints, type LabelEntry, type ResolveTextsBulkResponse, type TmPreset } from "../shared/types";
+import {
+  BASE_LANGUAGE as BASE_LANG,
+  isEditableEntry,
+  type ContextHints,
+  type LabelEntry,
+  type ResolveTextsBulkResponse,
+  type TmPreset,
+} from "../shared/types";
 
 /** Fired when the user clicks an editable chip — content/index.tsx opens the same editor the hover tooltip uses, anchored at (x, y). */
 export type TmEditRequestHandler = (entry: LabelEntry, language: string, x: number, y: number) => void;
@@ -21,9 +28,6 @@ export interface TmStyle {
 }
 
 const DEFAULT_TM_STYLE: TmStyle = { preset: "stacked", showFlags: true, showLangCodes: true, flagIdentical: true };
-
-/** Base/source language — same existing assumption as `metadata-translations.ts`'s `BASE_LANG` / `salesforce-api.ts`'s `CUSTOM_LABEL_BASE_LANGUAGE` (DECISIONS.md #41). */
-const BASE_LANG = "en_US";
 
 let isRunning = false;
 let currentActiveLanguages: string[] = [];

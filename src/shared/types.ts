@@ -128,6 +128,20 @@ export function isInSimpleScope(type: LabelType): boolean {
   return SIMPLE_SCOPE_TYPES.has(type);
 }
 
+/**
+ * The base/source language every entry is seeded from — read-side modules that need
+ * "which language is the point of comparison" (Quick Compare's identical-to-source
+ * flag, `metadata-translations.ts`'s describe/seed calls, Translation Health's own
+ * check) all share this ONE constant instead of each declaring their own copy of the
+ * same literal. Still an unverified assumption against a non-English-base org
+ * (DECISIONS.md #41) — centralizing it here means that gets fixed in exactly one
+ * place if it's ever wrong, not four. Deliberately NOT used by `salesforce-api.ts`'s
+ * `CUSTOM_LABEL_BASE_LANGUAGE` — that one is a write-path concern (which
+ * `ExternalString` row a Custom Label's base value actually PATCHes) with its own name
+ * for that reason, even though it happens to be the same value today.
+ */
+export const BASE_LANGUAGE = "en_US";
+
 export interface SaveTranslationRequest {
   type: "SAVE_TRANSLATION";
   origin: string;
