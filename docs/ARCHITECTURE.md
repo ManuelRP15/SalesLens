@@ -38,6 +38,7 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 | `metadata-translations.ts` | Read-side orchestrator: seeds `FieldLabel`/`ObjectLabel`/`PicklistValue`/etc. from `describe-api.ts`'s standard translations, overlays `CustomObjectTranslation` zip content as customized overrides. |
 | `metadata-write.ts` | Write-side orchestrator (PHASE 6b, `DECISIONS.md #53`): `saveMetadataTranslation` — per-`LabelType` target resolution (which XML file/node, plus the lesson-#15 sibling-unlock members retrieve() needs), locate-or-insert, optimistic concurrency, deploy. The `saveCustomLabelTranslation`-shaped counterpart for every editable type except `CustomLabel`. |
 | `metadata-write.test.ts` | Unit tests for the preserveOrder patch/insert/fresh-document logic above — fixture XML strings, no live org needed. |
+| `workspace.ts` | PHASE 16's pure core (`DECISIONS.md #65`): `recordEdit` (the fold rule — first `oldValue` kept, latest `newValue` wins), `packageMembersForEdit` (mirrors `metadata-write.ts`'s per-type dependency sets), `buildPackageXml`, `summarizeWorkspace`. Chrome-free; unit-tested in `workspace.test.ts`. |
 | `describe-api.ts` | Partner API SOAP client (`describeSObjects` + `LocaleOptions`, `describeLayout` via REST): Salesforce's own standard/default translations, independent of any org customization. |
 | `platform-labels.ts` | Curated built-in catalog of standard Salesforce platform UI strings (buttons, tabs) in es/fr/nl_NL — legitimate ONLY because these are Salesforce's own translations, identical in every org (`DECISIONS.md #37`). Never add anything admin-authored here. |
 | `mock-data.ts` | Sample `LabelEntry[]` used when there's no real org session (dev/no-`sid` fallback). |
@@ -62,15 +63,16 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`), Translation Health computation (`missingLanguages` + `identicalToSourceLanguages`, `DECISIONS.md #58`). |
+| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`), Translation Health computation (`missingLanguages` + `identicalToSourceLanguages`, `DECISIONS.md #58`), and Workspace capture — every successful `saveTranslation` folds a `WorkspaceEdit` into `chrome.storage.local.workspaceEdits` (PHASE 16, `DECISIONS.md #65`; fold rule in `shared/workspace.ts`). |
 
-### `src/popup/` and `src/health/` — extension UI surfaces
+### `src/popup/`, `src/health/`, `src/workspace/` — extension UI surfaces
 
 | File | Responsibility |
 |---|---|
-| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (`ShortcutToggleRow` — Enabled/Disabled + conflict-checked key recorder for `inspectorHotkey`/`holdHotkey`, `DECISIONS.md #57`), Display settings (incl. `flagIdenticalTranslations`), refresh button, link to Translation Health. |
+| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (`ShortcutToggleRow` — Enabled/Disabled + conflict-checked key recorder for `inspectorHotkey`/`holdHotkey`, `DECISIONS.md #57`), Display settings (incl. `flagIdenticalTranslations`), refresh button, links to Translation Health and Workspace. |
 | `health/Health.tsx` | Dedicated page (`chrome.tabs.create`): per-language Missing + Possibly-untranslated (identical-to-source) tables, computed by the background on every index refresh. |
-| `popup/main.tsx`, `health/main.tsx`, `*/index.html` | Standard React mount points — no logic. |
+| `workspace/Workspace.tsx` | Dedicated page (PHASE 16, `DECISIONS.md #65`): the automatically captured edit record — grouped by type, before→after comparator, per-item remove, two-stage clear, package.xml + JSON export. Reads/writes ONLY `workspaceEdits` from storage; never invents rows (capture lives in the background). |
+| `popup/main.tsx`, `health/main.tsx`, `workspace/main.tsx`, `*/index.html` | Standard React mount points — no logic. |
 
 ### Root config
 

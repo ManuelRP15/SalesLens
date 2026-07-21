@@ -27,11 +27,11 @@ export default defineManifest({
   action: {
     default_popup: "src/popup/index.html",
   },
-  // Lets crxjs pick up this extra standalone page as a build entry, and lets the
-  // popup open it via chrome.tabs.create(chrome.runtime.getURL(...)).
+  // Lets crxjs pick up these extra standalone pages as build entries, and lets the
+  // popup open them via chrome.tabs.create(chrome.runtime.getURL(...)).
   web_accessible_resources: [
     {
-      resources: ["src/health/index.html"],
+      resources: ["src/health/index.html", "src/workspace/index.html"],
       matches: ["https://*.lightning.force.com/*"],
     },
   ],
