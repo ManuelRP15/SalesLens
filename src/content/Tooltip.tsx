@@ -43,6 +43,18 @@ interface TooltipProps {
    * isn't editable — same silent-no-op philosophy as every other guard in this file.
    */
   editTrigger?: number;
+  /**
+   * Same counter pattern as `editTrigger`, opposite direction: each new value is a
+   * one-shot "cancel whatever's being edited right now" request — Escape or an
+   * outside click while an edit is in progress (content/index.tsx). Before this
+   * existed, Escape/outside-click were fully inert while editing (by design, to
+   * protect a mid-keystroke textarea from being ripped out) and ONLY the row's own
+   * Cancel button worked — confusing, since normal UI convention is that Escape/
+   * click-outside always let you back out. A counter (not a boolean) for the same
+   * reason as `editTrigger`: repeated presses need repeated edges to react to. No-op
+   * if nothing is currently being edited.
+   */
+  cancelTrigger?: number;
 }
 
 /** Copies to the clipboard, falling back to a hidden textarea if the Clipboard API is unavailable/blocked. */
@@ -245,6 +257,7 @@ function CandidateBlock({
   onEditingActiveChange,
   autoEditLanguage,
   editTrigger,
+  cancelTrigger,
 }: {
   entry: LabelEntry;
   activeLanguages: string[];
@@ -252,6 +265,7 @@ function CandidateBlock({
   onEditingActiveChange?: TooltipProps["onEditingActiveChange"];
   autoEditLanguage?: string;
   editTrigger?: number;
+  cancelTrigger?: number;
 }) {
   const colors = TYPE_COLORS[entry.type];
   const editable = isEditableLabelType(entry.type);
@@ -334,6 +348,16 @@ function CandidateBlock({
     const firstLang = langCodes[0];
     if (firstLang) startEdit(firstLang);
   }, [editTrigger]);
+
+  // Escape / outside-click cancel request (content/index.tsx) — see cancelTrigger's
+  // doc comment above for why this exists. No-op if nothing is being edited.
+  const cancelTriggerSeenRef = useRef(cancelTrigger);
+  useEffect(() => {
+    if (cancelTrigger === undefined || cancelTrigger === cancelTriggerSeenRef.current) return;
+    cancelTriggerSeenRef.current = cancelTrigger;
+    if (editingLang === null) return;
+    cancelEdit();
+  }, [cancelTrigger]);
 
   function cancelEdit() {
     setEditingLang(null);
@@ -462,7 +486,7 @@ function CandidateBlock({
   );
 }
 
-export function Tooltip({ text, x, y, candidates, activeLanguages, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage, editTrigger }: TooltipProps) {
+export function Tooltip({ text, x, y, candidates, activeLanguages, onSaveTranslation, onEditingActiveChange, onRectChange, autoEditLanguage, editTrigger, cancelTrigger }: TooltipProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ left: x + 12, top: y + 16 });
 
@@ -506,6 +530,7 @@ export function Tooltip({ text, x, y, candidates, activeLanguages, onSaveTransla
           onEditingActiveChange={onEditingActiveChange}
           autoEditLanguage={autoEditLanguage}
           editTrigger={editTrigger}
+          cancelTrigger={cancelTrigger}
         />
       ))}
     </div>

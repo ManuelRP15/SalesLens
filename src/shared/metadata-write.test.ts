@@ -136,6 +136,64 @@ describe("preserveOrder round-trip: inserting a NEW field translation", () => {
   });
 });
 
+describe("preserveOrder round-trip: inserting a NEW block keeps same-tag siblings contiguous (DECISIONS.md #55)", () => {
+  // Reproduces the real-org bug exactly: the file already has a <fields> group (e.g.
+  // a previously-customized CUSTOM field) followed by LATER element types
+  // (<validationRules>, <webLinks>). Editing a STANDARD field for the first time
+  // (never customized, so no <fields> entry for IT specifically) is an insert. The
+  // old implementation blindly pushed the new <fields> block to the very end of the
+  // document — AFTER <validationRules>/<webLinks> — splitting <fields> into two
+  // non-contiguous runs, which Salesforce's deploy validator rejects with "Element
+  // fields is duplicated at this location in type CustomObjectTranslation". This is
+  // exactly why custom-field edits "worked" (patching the existing contiguous group)
+  // while standard-field edits (first-time inserts) failed.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<CustomObjectTranslation xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fields>
+        <name>Industry__c</name>
+        <label>Industria</label>
+    </fields>
+    <validationRules>
+        <name>SomeRule</name>
+        <errorMessage>Untouched</errorMessage>
+    </validationRules>
+    <webLinks>
+        <name>SomeButton</name>
+        <label>Untouched Button</label>
+    </webLinks>
+</CustomObjectTranslation>`;
+
+  it("inserts a never-before-translated field's block adjacent to the EXISTING <fields> group, not after later elements", () => {
+    const doc = parseXmlPreserveOrder(xml);
+    const root = rootChildrenOf(doc, "CustomObjectTranslation");
+
+    // "Rating" — a standard field with no prior <fields> entry — is the insert case.
+    const block = locateOrCreateBlock(root, "fields", "name", "Rating");
+    xmlSetLeafText(block, "label", "Calificacion");
+
+    const reparsed = parseXmlPreserveOrder(buildXmlPreserveOrder(doc));
+    const reroot = rootChildrenOf(reparsed, "CustomObjectTranslation");
+
+    // Exactly one contiguous run of each tag — never split by a different tag.
+    const tags = reroot.map((n) => Object.keys(n).find((k) => k !== ":@"));
+    const uniqueRuns = tags.filter((tag, i) => tag !== tags[i - 1]);
+    expect(new Set(uniqueRuns).size).toBe(uniqueRuns.length); // no tag reappears in a separate run
+
+    const fields = xmlAllChildren(reroot, "fields");
+    expect(fields).toHaveLength(2);
+    const newField = fields.find((f) => xmlLeafText(xmlFirstChild(f, "name")) === "Rating");
+    expect(xmlLeafText(xmlFirstChild(newField!, "label"))).toBe("Calificacion");
+    const existingField = fields.find((f) => xmlLeafText(xmlFirstChild(f, "name")) === "Industry__c");
+    expect(xmlLeafText(xmlFirstChild(existingField!, "label"))).toBe("Industria");
+
+    // Unrelated content untouched.
+    const rule = xmlFirstChild(reroot, "validationRules");
+    expect(xmlLeafText(xmlFirstChild(rule!, "errorMessage"))).toBe("Untouched");
+    const link = xmlFirstChild(reroot, "webLinks");
+    expect(xmlLeafText(xmlFirstChild(link!, "label"))).toBe("Untouched Button");
+  });
+});
+
 describe("preserveOrder: building a FRESH document from scratch", () => {
   it("produces a minimal valid file that a field translation can be inserted into", () => {
     const doc = freshXmlDocument("CustomObjectTranslation");

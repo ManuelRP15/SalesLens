@@ -69,13 +69,45 @@ export function splitLast(value: string, sep: string): [string, string] {
 }
 
 /**
+ * Inserts a brand-new `{ [containerTag]: ... }` wrapper node into `parentChildren` at
+ * a position that keeps Salesforce's metadata XSD happy, instead of blindly appending
+ * at the very end (see DECISIONS.md #55 — this was a real, org-breaking bug: appending
+ * after unrelated later-in-schema elements like `<layouts>`/`<validationRules>`
+ * produced a SECOND, non-contiguous `<fields>` group, which Salesforce's deploy
+ * validator rejects outright with "Element fields is duplicated at this location").
+ * Metadata XSDs declare repeatable child elements in alphabetical order and require
+ * same-tag elements to stay contiguous, so: if same-tag siblings already exist,
+ * insert right after the LAST one (keeps the group contiguous regardless of where it
+ * sits); otherwise insert right before the first sibling whose tag sorts after
+ * `containerTag` alphabetically, or at the end if there isn't one.
+ */
+function insertContainerNode(parentChildren: XmlAstNode[], containerTag: string, wrapper: XmlAstNode): void {
+  const tagOf = (n: XmlAstNode) => Object.keys(n).find((k) => k !== ":@");
+  for (let i = parentChildren.length - 1; i >= 0; i--) {
+    if (tagOf(parentChildren[i]) === containerTag) {
+      parentChildren.splice(i + 1, 0, wrapper);
+      return;
+    }
+  }
+  for (let i = 0; i < parentChildren.length; i++) {
+    const tag = tagOf(parentChildren[i]);
+    if (tag && tag > containerTag) {
+      parentChildren.splice(i, 0, wrapper);
+      return;
+    }
+  }
+  parentChildren.push(wrapper);
+}
+
+/**
  * Finds the repeated `containerTag` block (e.g. one `<fields>` entry) whose
  * `matchTag` child text equals `matchValue`, returning that block's own children
- * array to read/patch a leaf within — or, if none exists yet, appends a brand new
- * block already seeded with `matchTag`, ready for a leaf to be added to it. This is
- * the ONE shared shape behind fields/recordTypes/webLinks/quickActions/customTabs/
- * customApplications/picklistValues — they're all "a list of blocks identified by one
- * child, holding another child as the actual value."
+ * array to read/patch a leaf within — or, if none exists yet, inserts a brand new
+ * block (via `insertContainerNode`, schema-order-safe) already seeded with
+ * `matchTag`, ready for a leaf to be added to it. This is the ONE shared shape behind
+ * fields/recordTypes/webLinks/quickActions/customTabs/customApplications/
+ * picklistValues — they're all "a list of blocks identified by one child, holding
+ * another child as the actual value."
  */
 export function locateOrCreateBlock(
   rootChildren: XmlAstNode[],
@@ -88,7 +120,7 @@ export function locateOrCreateBlock(
   );
   if (existing) return existing;
   const fresh: XmlAstNode[] = [{ [matchTag]: [{ "#text": matchValue }] }];
-  rootChildren.push({ [containerTag]: fresh });
+  insertContainerNode(rootChildren, containerTag, { [containerTag]: fresh });
   return fresh;
 }
 

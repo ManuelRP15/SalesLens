@@ -86,6 +86,10 @@ let tmEditorOpen = false;
 let lastTooltipArgs: { text: string; x: number; y: number; response: ResolveTextResponse } | null = null;
 /** Bumped on every Enter-to-edit press; see `editTrigger` on Tooltip.tsx for why a counter, not a boolean. */
 let editTriggerCounter = 0;
+/** Args of the currently-open Translation Mode click-editor — mirrors `lastTooltipArgs` for the hover path, so Escape/outside-click (see `requestCancelEdit`) can re-render it too. No `language`: the cancel re-render deliberately omits `autoEditLanguage` so the fresh mount starts in view mode instead of re-opening the very edit being cancelled. */
+let lastTmEditorArgs: { entry: LabelEntry; x: number; y: number } | null = null;
+/** Bumped on every Escape/outside-click while an edit is in progress; see `cancelTrigger` on Tooltip.tsx. */
+let cancelTriggerCounter = 0;
 
 document.addEventListener(
   "mousemove",
@@ -180,10 +184,20 @@ window.addEventListener(
       });
       return;
     }
-    // Never preventDefault/stopPropagation here: if exitInspectionMode()/closeTmEditor()
-    // no-ops because an edit is in progress, this event must still reach the editor's
-    // own Escape handler (bubble phase, runs after this capture-phase one) so Escape
-    // cancels the EDIT instead of silently doing nothing.
+    // While editing, Escape cancels the edit itself (requestCancelEdit) rather than
+    // falling through to exitInspectionMode/closeTmEditor, which still no-op during an
+    // edit by design — see DECISIONS.md #55. preventDefault/stopPropagation here is
+    // safe now (it wasn't previously): this used to deliberately let the event bubble
+    // to the editor's own local Escape handler since that was the ONLY thing that could
+    // cancel a stuck edit; requestCancelEdit replaces that reliance (and works even
+    // when a disabled Save button stole focus away from the textarea, which the local
+    // handler alone could not).
+    if (e.key === "Escape" && isEditingActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      requestCancelEdit();
+      return;
+    }
     if (e.key === "Escape" && inspectionModeActive) {
       exitInspectionMode();
       return;
@@ -223,9 +237,15 @@ window.addEventListener("blur", exitInspectionMode);
 // that could go stale, which is exactly what made the earlier pointer-events:none +
 // geometry approach (DECISIONS.md #45/#52) still close on some inside clicks. Only a
 // click on genuinely different page content (target ≠ shadowHost), Escape, or the
-// toggle key closes it now. See DECISIONS.md #54.
+// toggle key closes it now. See DECISIONS.md #54. While editing, an outside click
+// cancels the edit (requestCancelEdit) instead of being inert — same reasoning as the
+// Escape branch above, see DECISIONS.md #55.
 document.addEventListener("click", (e) => {
   if (shadowHost && e.target === shadowHost) return;
+  if (isEditingActive) {
+    requestCancelEdit();
+    return;
+  }
   if (inspectionModeActive) exitInspectionMode();
   if (tmEditorOpen) closeTmEditor();
 });
@@ -336,6 +356,7 @@ function clearTooltip() {
   tooltipRect = null;
   tmEditorOpen = false;
   lastTooltipArgs = null;
+  lastTmEditorArgs = null;
   ensureHost().render(null);
 }
 
@@ -393,17 +414,19 @@ function saveTranslation(
  * language for that one entry (not just the language clicked), with `autoEditLanguage`
  * pre-opening the one the user actually clicked.
  *
- * Guarded by `isEditingActive` (don't rip a focused editor out to open a different
- * one) and always renders through a `null` pass first — a `key` on the root element
- * passed to `root.render()` has no remount effect (there's no sibling list for it to
- * key against), so without this, clicking the same chip a second time in a row would
+ * Always renders through a `null` pass first — a `key` on the root element passed to
+ * `root.render()` has no remount effect (there's no sibling list for it to key
+ * against), so without this, clicking the same chip a second time in a row would
  * update props on the already-mounted instance instead of remounting it, and the
- * mount-once `autoEditLanguage` effect in Tooltip.tsx would never fire again.
+ * mount-once `autoEditLanguage` effect in Tooltip.tsx would never fire again. Shared
+ * by `openTmEditor` (opens editing on the clicked language) and `requestCancelEdit`
+ * (remounts WITHOUT `autoEditLanguage`, landing in view mode — the TM editor's own
+ * "cancel" mechanism, since it always force-remounts anyway).
  */
-function openTmEditor(entry: LabelEntry, language: string, x: number, y: number) {
-  if (isEditingActive) return;
+function renderTmTooltip(entry: LabelEntry, x: number, y: number, autoEditLanguage?: string) {
   tmEditorOpen = true;
   currentTooltipText = null;
+  lastTmEditorArgs = { entry, x, y };
   const host = ensureHost();
   host.render(null);
   host.render(
@@ -413,7 +436,7 @@ function openTmEditor(entry: LabelEntry, language: string, x: number, y: number)
       y={y}
       candidates={[entry]}
       activeLanguages={activeLanguages}
-      autoEditLanguage={language}
+      autoEditLanguage={autoEditLanguage}
       onSaveTranslation={saveTranslation}
       onEditingActiveChange={(active) => {
         isEditingActive = active;
@@ -422,6 +445,12 @@ function openTmEditor(entry: LabelEntry, language: string, x: number, y: number)
       onRectChange={(rect) => { tooltipRect = rect; }}
     />
   );
+}
+
+/** Guarded by `isEditingActive` — don't rip a focused editor out to open a different one. */
+function openTmEditor(entry: LabelEntry, language: string, x: number, y: number) {
+  if (isEditingActive) return;
+  renderTmTooltip(entry, x, y, language);
 }
 
 function closeTmEditor() {
@@ -445,6 +474,7 @@ function showTooltip(text: string, x: number, y: number, response: ResolveTextRe
       }}
       onRectChange={(rect) => { tooltipRect = rect; }}
       editTrigger={editTriggerCounter}
+      cancelTrigger={cancelTriggerCounter}
     />
   );
 }
@@ -461,6 +491,34 @@ function isTypingInPage(): boolean {
   const el = document.activeElement as HTMLElement | null;
   if (!el || el === document.body) return false;
   return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+}
+
+/**
+ * Escape or an outside click while an edit is in progress — cancels the edit, the
+ * same outcome as clicking the row's own Cancel button. Before this existed, Escape
+ * and outside-click were fully inert while editing (`isEditingActive` blocked
+ * `exitInspectionMode`/`closeTmEditor` outright, to protect a mid-keystroke textarea)
+ * and ONLY the Cancel button worked — confusing, since Escape/click-outside always
+ * being able to back you out is standard UI convention (real-org feedback:
+ * "no se quita el modal... solo dandole a cancel", see DECISIONS.md #55). Deliberately
+ * matches Cancel's actual scope — cancels the EDIT, tooltip stays open in view mode —
+ * not "also fully close the tooltip"; a second Escape/outside-click, now that editing
+ * has stopped, falls through to the normal exit/close paths below on its own.
+ *   - Hover path: re-renders the SAME tooltip with a bumped `cancelTrigger`, which
+ *     CandidateBlock reacts to by cancelling.
+ *   - Translation Mode path: the click-editor always force-remounts anyway (see
+ *     `renderTmTooltip`), so remounting WITHOUT `autoEditLanguage` lands it in view
+ *     mode directly — no `cancelTrigger` needed on this path.
+ * A no-op if nothing is being edited.
+ */
+function requestCancelEdit() {
+  if (!isEditingActive) return;
+  if (lastTooltipArgs) {
+    cancelTriggerCounter++;
+    showTooltip(lastTooltipArgs.text, lastTooltipArgs.x, lastTooltipArgs.y, lastTooltipArgs.response);
+  } else if (lastTmEditorArgs) {
+    renderTmTooltip(lastTmEditorArgs.entry, lastTmEditorArgs.x, lastTmEditorArgs.y);
+  }
 }
 
 /** Enter-to-edit (PHASE 17): re-shows the currently-inspected tooltip with a bumped `editTrigger`, which Tooltip.tsx's CandidateBlock reacts to by opening its first row's editor. A no-op if there's nothing showing, an edit is already active, or the user is typing elsewhere on the page. */
