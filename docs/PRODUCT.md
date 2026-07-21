@@ -52,8 +52,12 @@ to real user feedback instead of a fixed master plan.
 4. **Translation Health** — automatically analyze translation quality: untranslated
    languages, empty translations, translations identical to the source language
    (configurable), possible inconsistencies. Show discreet visual warnings.
-   *Status: basic missing-translation highlighting in the tooltip added in PHASE 4.
-   Org-wide/aggregate health analysis is still open (see PHASE 10).*
+   *Status: missing-translation highlighting (tooltip since PHASE 4, distinct
+   "missing" chips in Translation Mode + org-wide health table since PHASE 9/10) and
+   identical-to-source-language detection (configurable via
+   `Settings.flagIdenticalTranslations`) both shipped 2026-07-21 (DECISIONS.md #58).
+   Other consistency checks (duplicated values, broken/truncated text) still open,
+   see ROADMAP.md PHASE 10's QA Report v2.*
 
 5. **Language configuration** — each user can choose their primary languages, their
    order, colors, icons, and compact vs. expanded mode; the extension remembers these

@@ -41,6 +41,8 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 | `describe-api.ts` | Partner API SOAP client (`describeSObjects` + `LocaleOptions`, `describeLayout` via REST): Salesforce's own standard/default translations, independent of any org customization. |
 | `platform-labels.ts` | Curated built-in catalog of standard Salesforce platform UI strings (buttons, tabs) in es/fr/nl_NL — legitimate ONLY because these are Salesforce's own translations, identical in every org (`DECISIONS.md #37`). Never add anything admin-authored here. |
 | `mock-data.ts` | Sample `LabelEntry[]` used when there's no real org session (dev/no-`sid` fallback). |
+| `hotkeys.ts` | `normalizeBareKey`/`bareKeysConflict`/`pickAvailableBareKey` — comparison logic shared by the popup's conflict-checked hotkey recorders (`inspectorHotkey`/`holdHotkey`) and `content/index.tsx`'s live keydown matching, so "the same key" means one thing everywhere (`DECISIONS.md #57`). |
+| `hotkeys.test.ts` | Unit tests for the above — no Chrome dependency. |
 
 ### `src/content/` — injected into `*.lightning.force.com/*` pages
 
@@ -50,21 +52,21 @@ turn you add, remove, or repurpose a file (`WORKFLOW.md`'s doc-ownership rule).
 | `dom-utils.ts` | `deepElementFromPoint`/`extractOwnText` (hover), `resolveFieldContext`/`resolveSurfaceContext` (DOM-structure disambiguation hints), `collectTranslatableTargets` (Translation Mode's full-tree scan). |
 | `Tooltip.tsx` | The tooltip React component — display, inline Custom Label editor, Copy buttons, reports its own rect via `onRectChange` for the hover-ownership zone. |
 | `tooltip.css` | Styles injected into the closed Shadow DOM. |
-| `tooltip-constants.ts` | `TYPE_LABELS`/`TYPE_COLORS`/`langAccent`/`displayApiName` — shared visual language between `Tooltip.tsx` and `translation-mode.tsx`. Also `setupPath`/`copySoql`/`copyXmlMember` — per-type generators for the tooltip's Setup-navigation and Copy SOQL/XML actions (PHASE 5/14), each returning `null` rather than guessing when a type has no confident mapping. |
-| `translation-mode.tsx` | Translation Mode: bulk DOM scan, `RESOLVE_TEXTS_BULK`, inline translation chips appended directly to matched elements (real DOM injection, fully reversible on toggle-off). |
+| `tooltip-constants.ts` | `TYPE_LABELS`/`TYPE_COLORS`/`langAccent`/`displayApiName` — shared visual language between `Tooltip.tsx` and `translation-mode.tsx`. Also `setupPath` — per-type Setup-navigation URL generator (PHASE 5), returning `null` rather than guessing when a type has no confident mapping. (Copy SOQL/XML Member were removed entirely in `#56`.) |
+| `translation-mode.tsx` | Translation Mode: bulk DOM scan, `RESOLVE_TEXTS_BULK`, inline translation chips appended directly to matched elements (real DOM injection, fully reversible on toggle-off) — including distinct dashed "missing" chips and "≈ identical to source" marks (`DECISIONS.md #58`). |
 
 ### `src/background/` — the MV3 service worker
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`), Translation Health computation. |
+| `index.ts` | Owns the reverse index (`allEntries` + `ReverseIndex`, persisted to `chrome.storage.local`), cookie/session handling, all `chrome.runtime.onMessage` routing (`LOAD_LABELS`, `RESOLVE_TEXT`, `RESOLVE_TEXTS_BULK`, `GET_SETTINGS`, `SAVE_TRANSLATION`), Translation Health computation (`missingLanguages` + `identicalToSourceLanguages`, `DECISIONS.md #58`). |
 
 ### `src/popup/` and `src/health/` — extension UI surfaces
 
 | File | Responsibility |
 |---|---|
-| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (hotkey recorder), Display settings, refresh button, link to Translation Health. |
-| `health/Health.tsx` | Dedicated page (`chrome.tabs.create`): per-language missing-translation table, computed by the background on every index refresh. |
+| `popup/Popup.tsx` | Enable toggle, Translation Mode toggle, language selector, Shortcuts (`ShortcutToggleRow` — Enabled/Disabled + conflict-checked key recorder for `inspectorHotkey`/`holdHotkey`, `DECISIONS.md #57`), Display settings (incl. `flagIdenticalTranslations`), refresh button, link to Translation Health. |
+| `health/Health.tsx` | Dedicated page (`chrome.tabs.create`): per-language Missing + Possibly-untranslated (identical-to-source) tables, computed by the background on every index refresh. |
 | `popup/main.tsx`, `health/main.tsx`, `*/index.html` | Standard React mount points — no logic. |
 
 ### Root config

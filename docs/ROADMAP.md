@@ -29,15 +29,15 @@ marked "done" before 2026-07-21 is off by default without checking.
 | 6 | Inline translation editing | ✅ v1 (Custom Labels) + 6b (8 more types via deploy()) done | 6c (ObjectLabel/RelatedList caseValues, global QuickAction) pending |
 | 7 | Standard labels without Translation Workbench | ✅ done | — |
 | 8 | Metadata-type detection + Metadata Lens | 🟡 detection heuristics done (advanced types opt-in), Lens pending | — |
-| 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing; advanced-type badges opt-in) | — |
-| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default), QA Report v2 pending | — |
+| 9 | Translation Mode | 🟡 v4 done (display + Custom Label editing; advanced-type badges opt-in); missing/identical-to-source chip signals shipped 2026-07-21 (DECISIONS.md #58) | rest of QA Mode refinement (longer-term Screen Flows) pending |
+| 10 | Translation Health | 🟡 v1 done (scoped by Simple Mode by default); identical-to-source column shipped 2026-07-21 (DECISIONS.md #58, closes PRODUCT.md MVP capability #4); rest of QA Report v2 (Duplicated/Broken/Terminology) pending | — |
 | 11 | Language config UI + Quick Compare | ⬜ pending | — |
 | 12 | Advanced Metadata Inspector | ⬜ pending | — |
 | 13 | Smart Search | ⬜ pending | — |
 | 14 | Productivity Actions | 🟡 Copy API Name done; Copy SOQL/XML **removed** 2026-07-21 (DECISIONS.md #56 — kept the extension simple per direct product feedback); export pending | — |
 | 15 | Dependency Inspector | ⬜ pending | ⚠️ feasibility unconfirmed |
 | 16 | Workspace / Metadata Basket / package.xml Builder | ⬜ pending | **Muy Alta** |
-| 17 | Keyboard-First Experience | 🟡 Enter-to-edit shipped; save/cancel already worked; hold-vs-toggle hover redesign shipped 2026-07-21 (DECISIONS.md #56); arrow-key navigation still pending | **Muy Alta** |
+| 17 | Keyboard-First Experience | 🟡 Enter-to-edit shipped; save/cancel already worked; hold-vs-toggle hover redesign shipped 2026-07-21 (DECISIONS.md #56); shortcut settings UX simplified + mutual conflict prevention shipped 2026-07-21 (DECISIONS.md #57); arrow-key navigation still pending | **Muy Alta** |
 | 18 | Translation Navigator & Page Coverage | ⬜ pending | Alta |
 | 19 | Hover History & Favorites | ⬜ pending | Alta |
 | 20 | Open in VS Code | ⬜ pending | ⚠️ needs a Native Messaging host — architecture decision first |
@@ -274,19 +274,24 @@ testing found the editor opened and immediately closed itself (~1ms) — a genui
 state-timing bug, root-caused and fixed, see `DECISIONS.md #50`. v4 is now believed
 stable; still needs a real-org click to confirm the fix.
 
-**Future refinement — Translation QA Mode (2026-07-19 product review, ⭐⭐⭐⭐⭐
-potential, the single highest-rated idea in that review):** the pitch is a tester
-saying "check this screen is well translated in French and Dutch" and getting the
-answer in seconds instead of switching languages and comparing by eye. Two concrete
-additions to the existing inline-badge mechanism, both computable from data already in
-the reverse index (no new API calls):
-- Fields with no value for an active language get a visually distinct "missing"
-  treatment on their badge (today, missing languages are silently absent from the
-  badge row — they should stand out instead).
-- A translation whose value is byte-identical to the source/base language gets marked
-  suspicious (a real possible failure mode: someone copy-pasted the source value into
-  the translation field instead of translating it) — configurable, since some short
-  strings (numbers, brand names, acronyms) are identical across languages legitimately.
+**Translation QA Mode (2026-07-19 product review, ⭐⭐⭐⭐⭐ potential, the single
+highest-rated idea in that review) — the first two concrete additions SHIPPED
+2026-07-21 (`DECISIONS.md #58`):**
+- ✅ **Missing-language chips**: a matched entry's badge now renders a chip for EVERY
+  active language, not just the ones with a value — a language with none gets a
+  dashed, dimmed "— missing —" placeholder instead of being silently absent, and is
+  clickable-to-fill-in when the type is editable (reuses the existing empty-value
+  editor path, no new mechanism).
+- ✅ **Identical-to-source flagging**: a translation whose value is byte-identical to
+  the base-language value gets a small "≈" mark — gated by
+  `Settings.flagIdenticalTranslations` (default on), since some short strings
+  (numbers, brand names, acronyms) are identical across languages legitimately and
+  this project's "zero false positives" bar means that needs a real off-switch, not
+  just a flag people learn to ignore.
+- Still open: the tester-facing "check this screen in French and Dutch" summary view
+  itself (today the signals live on individual chips, not yet rolled up into a
+  per-page pass/fail read) — the underlying data is already there, this is a
+  presentation layer on top.
 - Longer-term, extend Translation Mode beyond Lightning Record Pages to **Screen
   Flows**, which have their own translation surface the extension doesn't touch yet.
 
@@ -306,8 +311,12 @@ opened via `chrome.tabs.create` rather than referenced directly in the manifest.
 - The health page reads that + `settings` from storage and renders one row per active
   language (missing count + a coverage bar), expandable into the actual list of
   `apiName (type)` missing that language.
-- Not yet done: "identical to source language" detection and other consistency checks
-  beyond plain missing-ness (still open, see `PRODUCT.md`'s MVP capability #4).
+- ✅ **"Identical to source language" detection shipped 2026-07-21** (`DECISIONS.md
+  #58`, closes `PRODUCT.md`'s MVP capability #4): `TranslationHealthEntry` now also
+  carries `identicalToSourceLanguages`, shown as a "Possibly untranslated" column
+  (hidden when `Settings.flagIdenticalTranslations` is off) with the same expandable
+  per-language detail as Missing. Other consistency checks beyond missing/identical
+  (Duplicated, Broken, Terminology) are still open — see QA Report v2 below.
 
 **Future refinement — QA / Localization Report v2 (2026-07-19 product review,
 ⭐⭐⭐⭐⭐ potential):** extend the current per-language missing-count table with:
@@ -321,10 +330,11 @@ opened via `chrome.tabs.create` rather than referenced directly in the manifest.
 - **Terminology consistency checker** (2026-07-20 roadmap review, backlog idea #14 "AI Consistency Checker" — despite the name, this doesn't require an actual model): flag when the same source term (e.g. "Account", "Save") is translated inconsistently across different entries in the same language (e.g. "Cuenta" in one place, "Cliente" in another) — a clustering/grouping pass over the existing reverse index, not a new data source. Needs a concrete similarity/grouping definition confirmed against real inconsistency examples before implementation, same "don't guess at a heuristic" discipline as the Broken-detection bullet above.
 - **Export** (CSV/JSON) of the report — same underlying need as PHASE 14's export item,
   should share one implementation.
-- This ties directly into "identical to source language" detection above and the
-  Translation QA Mode refinement in PHASE 9 — the per-page inline flagging and the
-  org-wide report should be driven by the same underlying health computation in
-  `background/index.ts`, not two separate implementations.
+- ✅ **Architecture guidance followed**: "identical to source language" above and
+  PHASE 9's chip flagging are driven by the exact same `computeTranslationHealth()`
+  computation in `background/index.ts` (`identicalToSourceLanguages`), not two
+  separate implementations — the per-page chips and the org-wide report read the same
+  underlying signal.
 
 ### PHASE 11 — Language configuration UI + Quick Compare
 Beyond the popup's language checkboxes: user-configurable language order, colors, and
@@ -532,6 +542,20 @@ Still open: arrow-key navigation between matches (blocked on PHASE 18's ordered 
 list) and further hotkey configurability (double-press-to-toggle, configurable grace
 period). Real-org UNVERIFIED — this is a genuine interaction-model change, confirm the
 full feel (pin, hold-to-move, magnifier show/hide, both close paths) before trusting it.
+
+### PHASE 17 additions — shortcut settings UX simplified + conflict prevention shipped (2026-07-21)
+Direct real-org feedback on the hold-vs-toggle redesign above: the popup's hotkey
+controls read as confusing (`DECISIONS.md #57`) — disabling Hold to move tooltip's key
+left its recorder displaying "Always on," a placeholder meant for the OTHER setting's
+different null-meaning. Both `inspectorHotkey` and `holdHotkey` now present as a single
+`ShortcutToggleRow` shape: an Enabled/Disabled pill switch + an activation-key recorder
+that's dimmed/inert while disabled, no third "Always" mode implied. Behavior underneath
+is unchanged (disabled `inspectorHotkey` still falls back to classic Always Hover,
+exactly as before) — this was a UI relabel, not a logic change. New: the two shortcuts
+can no longer be set to the same key — `shared/hotkeys.ts`'s `bareKeysConflict` rejects
+the attempt inline with an explanation, and `pickAvailableBareKey` picks a safe
+alternate when a shortcut is re-enabled and its own default would collide with the
+other's current custom key.
 
 ### PHASE 18 — Translation Navigator & Page Coverage
 **Alta priority.** Backlog ideas #5 and #6, grouped together because both are
