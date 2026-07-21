@@ -38,7 +38,7 @@ marked "done" before 2026-07-21 is off by default without checking.
 | 15 | Dependency Inspector | ⬜ pending | ⚠️ feasibility unconfirmed |
 | 16 | Workspace / Metadata Basket / package.xml Builder | ⬜ pending | **Muy Alta** |
 | 17 | Keyboard-First Experience | 🟡 Enter-to-edit shipped; save/cancel already worked; hold-vs-toggle hover redesign shipped 2026-07-21 (DECISIONS.md #56); shortcut settings UX simplified + mutual conflict prevention shipped 2026-07-21 (DECISIONS.md #57); arrow-key navigation still pending | **Muy Alta** |
-| 18 | Translation Audit & Guided Navigation ("Translate All" evolution, absorbs the old "Translation Navigator") | 🟡 v1 shipped 2026-07-21 (DECISIONS.md #60): embedded audit panel, Missing/Identical/Complete filters, guided scroll+highlight+edit navigation, live re-evaluation after save | Duplicated filter designed but deferred (needs its own real-org check); Page Coverage stat line folded into the panel header instead of a separate feature |
+| 18 | Translation Audit & Guided Navigation ("Translate All" evolution, absorbs the old "Translation Navigator") | 🟡 v1 shipped 2026-07-21 (`#60`); first real-org bug round fixed same day (`#61`): sticky-header scroll correction, editor-closes-on-click root cause (Dynamic Hover parity), Complete-tab overflow, session-local translation scope toggle (All fields/Current only) | Duplicated filter designed but deferred (needs its own real-org check); Page Coverage stat line folded into the panel header instead of a separate feature |
 | 19 | Hover History & Favorites | ⬜ pending | Alta |
 | 20 | Open in VS Code | ⬜ pending | ⚠️ needs a Native Messaging host — architecture decision first |
 | 21 | Team Mode | ⬜ pending | ⚠️ needs a shared backend — architecture decision first |
@@ -711,11 +711,10 @@ retrigger a scan.
   codebase — this is a genuine interaction-heavy feature (scroll timing, highlight
   positioning across Lightning's nested/shadow layouts) that needs a real click-through
   more than most.
-- `scrollIntoView`'s "smooth" behavior has no completion callback; the editor opens
-  after a fixed short delay rather than a true "scroll finished" signal — matches this
-  codebase's existing comfort with small timing constants (`HOVER_DEBOUNCE_MS`,
-  `CLEAR_GRACE_MS`, etc.), but a very slow/janky page could theoretically open the
-  editor slightly before the scroll settles.
+- `scrollIntoView`'s "smooth" behavior has no completion callback, and (found in real-
+  org testing, fixed in `#61` — see the additions section below) can't be trusted
+  alone against Salesforce's pinned/sticky headers and nested scroll containers either.
+  A verify-and-correct pass now runs after it should have settled.
 - The de-duplication key (`apiName + type`) means only the FIRST on-page occurrence of
   a repeated entry (e.g. a field shown on both a detail panel and a related list) is
   ever the navigation target — a deliberate simplification, not a bug, but worth
@@ -747,6 +746,51 @@ keyboard shortcuts for Next/Prev (ties into PHASE 17's existing hotkey infrastru
 natural fit, not built yet); remembering filter/position across a page navigation
 within the same record page (today's state is page-load-scoped, matching how
 Translation Mode's own scan already resets).
+
+### PHASE 18 additions — first real-org bug round shipped (`DECISIONS.md #61`, 2026-07-21)
+Found via actual guided-navigation use on a real Lightning page, same day v1 shipped —
+exactly the "needs a real click-through" caveat above paying off. Four fixes, each
+root-caused rather than patched:
+
+- **Sticky/pinned-header navigation fixed.** `scrollIntoView` alone couldn't be
+  trusted against Salesforce's pinned headers and nested scroll containers — it could
+  decide a `position: sticky` target was "already visible" by its own rect math, or
+  scroll the wrong container, while the highlight overlay (computed independently via
+  live `getBoundingClientRect()`) kept tracking correctly regardless, which is exactly
+  why the target looked right but the viewport didn't move. Fixed with a
+  verify-and-correct pass (`ensureVisibleAboveObstruction` in `content/index.tsx`) that
+  measures where the target actually ended up and applies a direct corrective scroll on
+  its REAL scrolling ancestor if it's covered by pinned chrome — generic (samples the
+  live DOM for `position: fixed`/`sticky`, no hardcoded Salesforce selectors) and
+  symmetric (doesn't care which direction the navigation came from). `dom-utils.ts`'s
+  `parentAcrossShadow` was exported rather than reimplemented for the shadow-piercing
+  ancestor walks this needed.
+- **Editor-closes-on-click root cause found and fixed — a real Dynamic Hover parity
+  gap, not a click-outside/shadow-DOM bug.** `reconcileAfterEdit()` used to check only
+  `isEngineLive()`, which is ALWAYS false while Translation Mode is on — so finishing
+  ANY edit inside the TM/audit editor (even a harmless textarea blur from clicking a
+  different row's own button) unconditionally tore the whole tooltip down. Dynamic
+  Hover never hit this because `isEngineLive()` stays true there. Fixed by also
+  checking `!tmEditorOpen` — genuine parity, not a second interaction model. Navigating
+  to a new entry (Next/Previous/a different filter) now explicitly cancels an
+  in-progress edit first, matching Escape/outside-click's existing precedent (`#55`).
+- **Complete tab overflow fixed structurally, not with a pixel patch.** The filter
+  tabs row was `display: flex` with no wrap/shrink, so four pills with count badges
+  could overflow past the panel's right edge once counts hit double digits. Switched
+  to a 4-column CSS grid (always exactly matches the container's content width) and
+  restructured each tab to stack its label above its count instead of fighting for
+  width on one line.
+- **Translation scope (all fields vs. current field), evaluated and shipped as a
+  session-local toggle, not a persisted setting.** Both modes are real, requested, and
+  cheap to support: "All fields" (default) is the existing behavior; "Current only"
+  hides every on-page badge except the audit panel's current target, via a new
+  presentational-only `setBadgeScope()` in `translation-mode.tsx` (no re-scan, no
+  re-fetch — just toggling `display:none` on already-built badges). Lives as a
+  single click-to-flip button in the panel's own header, not a `Settings` field — this
+  is a live workflow control flipped mid-session, the same category as the panel's own
+  filter/expanded state, not a stable cross-session preference.
+
+Full write-up, including the exact root-cause reasoning for each: `DECISIONS.md #61`.
 
 ### PHASE 19 — Hover History & Favorites
 **Alta priority.** Backlog ideas #7 and #8, grouped as a pair of small local-list
