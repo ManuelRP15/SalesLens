@@ -29,6 +29,15 @@ Full step-by-step for each session type (what to read, what to ask the user, wha
 update afterward) is in **`docs/WORKFLOW.md`** — read it once if you're unsure how an
 Epic/bug-fix/refactor session is supposed to start and end.
 
+## Optional: run work through the AI Software Factory
+
+`.factory/` is a reusable, quality-first orchestration layer that *drives* this doc set
+(it doesn't replace it). The owner can invoke `/factory <goal>` to route a task through
+risk-based tiers, explicit quality gates, machine verification, and an honest real-org
+handoff. Its tiers map onto this project's session shapes (T1≈bug, T2≈Epic, T3≈refactor).
+Start at `.factory/MANIFESTO.md`; the project binding is `.factory/project/adapter.md`.
+Working directly per `docs/WORKFLOW.md` (no `/factory`) remains completely valid.
+
 ## Non-negotiable rules
 
 Full rationale for each is in `docs/ARCHITECTURE.md`. Violating any of these breaks the
