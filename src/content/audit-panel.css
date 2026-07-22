@@ -235,6 +235,30 @@
   flex: none;
 }
 
+/* "Add filtered to Workspace" (Workspace v4, DECISIONS.md #68) — one contextual
+   bulk action over the filter the panel already has, not a second selection UI. */
+.sti-audit-panel__ws-add {
+  padding: 0 12px 8px;
+  flex: none;
+}
+
+.sti-audit-ws-add-btn {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0176d3;
+  background: #eef6fd;
+  border: 1px solid #cfe6fa;
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.sti-audit-ws-add-btn:hover {
+  background: #d8ecfa;
+}
+
 /* Label and count stack vertically rather than sitting side by side — a real page
    can easily have double-digit counts in every category, and "Identical 11" fighting
    for width inside a quarter-panel column truncates awkwardly even with ellipsis.
@@ -503,4 +527,14 @@
   white-space: nowrap;
   flex: none;
   opacity: 0.85;
+}
+
+/* "Tracked in Workspace" marker (Workspace v3, DECISIONS.md #67) — a quiet dot, not a
+   badge: the row's status color already carries the important signal, this is a
+   secondary "you've already touched this" hint. */
+.sti-audit-panel__row-ws {
+  color: #0176d3;
+  font-size: 8px;
+  flex: none;
+  line-height: 1;
 }

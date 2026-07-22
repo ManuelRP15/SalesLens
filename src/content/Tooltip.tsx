@@ -332,6 +332,7 @@ function CandidateBlock({
     autoEditLanguage ? entry.valuesByLang[autoEditLanguage] ?? "" : ""
   );
   const [conflictNotice, setConflictNotice] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   // Deliberately keyed on editingLang alone: onEditingActiveChange is a stable
   // closure for the lifetime of this rendered tooltip (index.tsx only creates a new
@@ -429,6 +430,15 @@ function CandidateBlock({
       setEditingLang(null);
       setEditStatus("idle");
       setEditError(undefined);
+      // Every successful save also captures/updates a Workspace row (the background's
+      // one write choke point, DECISIONS.md #65) — say so, briefly, instead of letting
+      // it happen silently (Workspace v3, #67: the owner's "don't make me deduce what
+      // just happened" note). Same transient slot/timing as the conflict notice above.
+      // The background already knows whether this element was new to the Workspace or
+      // already tracked (Workspace v4, #68) — trust that instead of always claiming
+      // "Added" for what might be the fifth update to something already there.
+      setSaveNotice(response.workspaceCaptureKind === "updated" ? "Saved · Updated in Workspace" : "Saved · Added to Workspace");
+      setTimeout(() => setSaveNotice(null), 3000);
     } else {
       setEditStatus("error");
       setEditError(response.error ?? "Save failed.");
@@ -471,6 +481,7 @@ function CandidateBlock({
         )}
       </div>
       {conflictNotice && <div className="sti-conflict-notice">{conflictNotice}</div>}
+      {!conflictNotice && saveNotice && <div className="sti-save-notice">{saveNotice}</div>}
       {langCodes.length > 0 ? (
         <ul className="sti-tooltip__translations">
           {langCodes.map((lang) => {

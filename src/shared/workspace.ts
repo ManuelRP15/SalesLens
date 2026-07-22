@@ -1,16 +1,36 @@
 import { METADATA_API_VERSION } from "./metadata-api";
 import { splitLast } from "./metadata-write";
-import type { LabelEntry, WorkspaceEdit, WorkspaceItem, WorkspacePin } from "./types";
+import type {
+  LabelEntry,
+  LabelType,
+  WorkspaceEdit,
+  WorkspaceHistoryEntry,
+  WorkspaceItem,
+  WorkspacePin,
+  WorkspaceReviewedMap,
+} from "./types";
 
 /**
  * PHASE 16 — the Workspace's pure core: how captured items accumulate (edits from the
  * save path, pins from the inspector), how legacy v1 storage migrates, how items
  * translate into the metadata components a deployment manifest (package.xml) needs,
- * and how "did this change behind my back" is assessed against the live index.
+ * how "did this change behind my back" is assessed against the live index, and (v3,
+ * `DECISIONS.md #67`) how items group into ELEMENTS — the atomic unit the Workspace
+ * page renders, selects, and reviews by — plus the self-invalidating "reviewed" state
+ * that sits alongside items in its own `workspaceReviewed` storage key.
  * Everything here is chrome-free and unit-tested. The background owns WHEN an item is
- * recorded (`background/index.ts`); the Workspace page owns HOW it's shown
- * (`src/workspace/Workspace.tsx`).
+ * recorded (`background/index.ts`); the Workspace page owns HOW it's shown and owns
+ * `workspaceReviewed` entirely (`src/workspace/Workspace.tsx`).
  */
+
+/**
+ * Identity of the ELEMENT an item belongs to — the unit Workspace v3 groups, selects,
+ * and reviews by (`DECISIONS.md #67`). Edits and pins for the same (type, apiName)
+ * share this key even though `itemKey` (below) keeps them as distinct rows.
+ */
+export function elementKey(type: LabelType, apiName: string): string {
+  return `${type} ${apiName}`;
+}
 
 /**
  * Identity of one item row. Edits are per (type, apiName, language) — each language of
@@ -19,8 +39,8 @@ import type { LabelEntry, WorkspaceEdit, WorkspaceItem, WorkspacePin } from "./t
  */
 export function itemKey(item: WorkspaceItem): string {
   return item.kind === "edit"
-    ? `edit ${item.type} ${item.apiName} ${item.language}`
-    : `pin ${item.type} ${item.apiName}`;
+    ? `edit ${elementKey(item.type, item.apiName)} ${item.language}`
+    : `pin ${elementKey(item.type, item.apiName)}`;
 }
 
 /**
@@ -54,12 +74,39 @@ export function normalizeStoredWorkspace(itemsRaw: unknown, legacyEditsRaw: unkn
  * ends up equal to its original `oldValue` (the user edited back to the original by
  * hand) is kept, not dropped: the element WAS touched, and rows that silently vanish
  * would make the list feel unreliable.
+ *
+ * Every fold also appends to `history` (Workspace v4, `DECISIONS.md #68`) — the exact
+ * `(oldValue, newValue, timestamp)` this specific save carried, nothing reconstructed.
  */
 export function recordEdit(items: WorkspaceItem[], edit: WorkspaceEdit): WorkspaceItem[] {
   const key = itemKey(edit);
   const existing = items.find((i) => itemKey(i) === key);
-  if (!existing) return [...items, edit];
-  return items.map((i) => (itemKey(i) === key ? { ...i, newValue: edit.newValue, timestamp: edit.timestamp } : i));
+  const historyEntry = { timestamp: edit.timestamp, oldValue: edit.oldValue, newValue: edit.newValue };
+  if (!existing) return [...items, { ...edit, editCount: 1, history: [historyEntry] }];
+  return items.map((i) =>
+    itemKey(i) === key
+      ? {
+          ...i,
+          newValue: edit.newValue,
+          timestamp: edit.timestamp,
+          editCount: ((i as WorkspaceEdit).editCount ?? 1) + 1,
+          history: [...((i as WorkspaceEdit).history ?? []), historyEntry],
+        }
+      : i
+  );
+}
+
+/**
+ * The edit's full history, oldest first — real entries if the row has them, or one
+ * best-effort reconstruction from its top-level fields for rows captured before
+ * `history` existed. The reconstructed entry is honestly partial: it's the LATEST
+ * transition only (the original `oldValue` alongside the current `newValue`), not a
+ * fabricated step-by-step trail — there is no way to know what the intermediate values
+ * were for those rows, and this doesn't pretend otherwise.
+ */
+export function historyOf(edit: WorkspaceEdit): WorkspaceHistoryEntry[] {
+  if (edit.history && edit.history.length > 0) return edit.history;
+  return [{ timestamp: edit.timestamp, oldValue: edit.oldValue, newValue: edit.newValue }];
 }
 
 /**
@@ -77,7 +124,17 @@ export function togglePin(items: WorkspaceItem[], pin: WorkspacePin): { items: W
 
 /** The `"type apiName"` pin keys currently in the list — what the tooltip needs to render "In Workspace ✓". */
 export function pinnedKeys(items: WorkspaceItem[]): Set<string> {
-  return new Set(items.filter((i) => i.kind === "pin").map((i) => `${i.type} ${i.apiName}`));
+  return new Set(items.filter((i) => i.kind === "pin").map((i) => elementKey(i.type, i.apiName)));
+}
+
+/**
+ * Every element key present in the Workspace, pinned OR edited — what a read-only
+ * "tracked in Workspace" indicator elsewhere in the product needs (the Translate All
+ * audit panel, Workspace v3, `DECISIONS.md #67`). Unlike `pinnedKeys`, doesn't care
+ * which kind put the element there.
+ */
+export function allElementKeys(items: WorkspaceItem[]): Set<string> {
+  return new Set(items.map((i) => elementKey(i.type, i.apiName)));
 }
 
 export interface PackageMember {
@@ -332,4 +389,164 @@ export function assessDrift(item: WorkspaceItem, entry: LabelEntry | undefined):
     if (currentValue !== capturedValue) changes.push({ language, capturedValue, currentValue });
   }
   return changes.length === 0 ? { state: "clean" } : { state: "changed", changes };
+}
+
+/**
+ * One element (type + apiName) and every item captured for it — the atomic unit
+ * Workspace v3 renders, selects, and reviews (`DECISIONS.md #67`), replacing the old
+ * per-type/per-row grouping. An element with edits in two languages plus a pin is ONE
+ * group with three items, not three unrelated rows.
+ */
+export interface ElementGroup {
+  key: string;
+  type: LabelType;
+  apiName: string;
+  items: WorkspaceItem[];
+  /** The latest `timestamp` across every item in the group. */
+  latestTimestamp: number;
+}
+
+/** Groups items by `elementKey`. Order follows first appearance in `items`; callers sort as they render. */
+export function groupItemsByElement(items: WorkspaceItem[]): ElementGroup[] {
+  const groups = new Map<string, ElementGroup>();
+  for (const item of items) {
+    const key = elementKey(item.type, item.apiName);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.items.push(item);
+      existing.latestTimestamp = Math.max(existing.latestTimestamp, item.timestamp);
+    } else {
+      groups.set(key, { key, type: item.type, apiName: item.apiName, items: [item], latestTimestamp: item.timestamp });
+    }
+  }
+  return [...groups.values()];
+}
+
+/**
+ * The element's drift, aggregated from `assessDrift` on each of its items — reused,
+ * not reimplemented. All items in a group share one `entry` lookup (same type +
+ * apiName), so "unknown" is uniform across the group; "changed" combines every
+ * drifted language across the group's items (edit values and pin-snapshot values
+ * alike) into one list, deduplicated by language.
+ */
+export function elementDrift(group: ElementGroup, entriesByKey: Map<string, LabelEntry>): WorkspaceDrift {
+  const entry = entriesByKey.get(group.key);
+  const perItem = group.items.map((item) => assessDrift(item, entry));
+  if (perItem.some((d) => d.state === "unknown")) return { state: "unknown" };
+  const changesByLanguage = new Map<string, DriftedLanguage>();
+  for (const drift of perItem) {
+    if (drift.state !== "changed") continue;
+    for (const change of drift.changes) changesByLanguage.set(change.language, change);
+  }
+  return changesByLanguage.size === 0 ? { state: "clean" } : { state: "changed", changes: [...changesByLanguage.values()] };
+}
+
+/**
+ * Whether a "reviewed" mark on this element still holds — self-invalidating by
+ * design (`DECISIONS.md #67`): stale the instant something newer touches the
+ * element (another edit/pin, bumping `latestTimestamp`) or the org drifts under it.
+ * Nothing has to actively clear `workspaceReviewed` for this to work.
+ */
+export function isReviewedFresh(reviewedAt: number | undefined, group: ElementGroup, drift: WorkspaceDrift): boolean {
+  if (reviewedAt === undefined) return false;
+  if (reviewedAt < group.latestTimestamp) return false;
+  return drift.state !== "changed";
+}
+
+/** Defensive parse of the `workspaceReviewed` storage value — drops anything that isn't a clean `string -> number` map, same posture as `normalizeStoredWorkspace`. */
+export function normalizeReviewedMap(raw: unknown): WorkspaceReviewedMap {
+  const result: WorkspaceReviewedMap = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return result;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "number") result[key] = value;
+  }
+  return result;
+}
+
+/** Element-level counts for an at-a-glance summary — the same computation the Workspace page does per row (`allGroups` in `Workspace.tsx`), extracted so the popup can share it instead of re-deriving its own (Workspace v4, `DECISIONS.md #68`). */
+export interface WorkspaceOverviewCounts {
+  elementCount: number;
+  needsReviewCount: number;
+  changedCount: number;
+}
+
+export function workspaceOverviewCounts(
+  items: WorkspaceItem[],
+  reviewed: WorkspaceReviewedMap,
+  entriesByKey: Map<string, LabelEntry>
+): WorkspaceOverviewCounts {
+  const groups = groupItemsByElement(items);
+  let needsReviewCount = 0;
+  let changedCount = 0;
+  for (const group of groups) {
+    const drift = elementDrift(group, entriesByKey);
+    if (drift.state === "changed") changedCount += 1;
+    if (!isReviewedFresh(reviewed[group.key], group, drift)) needsReviewCount += 1;
+  }
+  return { elementCount: groups.length, needsReviewCount, changedCount };
+}
+
+/**
+ * A whole Workspace's state, portable across machines/sessions (Workspace v4,
+ * `DECISIONS.md #68`) — deliberately NOT package.xml: this describes the extension's
+ * OWN state (what's tracked, its history, review status), package.xml describes
+ * Salesforce metadata for a deploy. `formatVersion` exists so a future shape change
+ * has somewhere to branch from; there's exactly one version today.
+ */
+export interface WorkspaceExport {
+  formatVersion: 1;
+  exportedAt: number;
+  items: WorkspaceItem[];
+  reviewed: WorkspaceReviewedMap;
+}
+
+export function buildWorkspaceExport(items: WorkspaceItem[], reviewed: WorkspaceReviewedMap): WorkspaceExport {
+  return { formatVersion: 1, exportedAt: Date.now(), items, reviewed };
+}
+
+export interface ParsedWorkspaceImport {
+  items: WorkspaceItem[];
+  reviewed: WorkspaceReviewedMap;
+}
+
+/**
+ * Defensive parse of an imported Workspace file. Accepts the v4 envelope AND a bare
+ * `WorkspaceItem[]` — what the pre-v4 "Export JSON" button produced, so nothing
+ * exported before this feature existed is stranded. Reuses `normalizeStoredWorkspace`/
+ * `normalizeReviewedMap` for row-level validation (they already drop malformed entries
+ * instead of guessing) rather than re-implementing that. Anything else — not JSON,
+ * not an array, not an object with an `items` array — returns `null`.
+ */
+export function parseWorkspaceExport(raw: unknown): ParsedWorkspaceImport | null {
+  if (Array.isArray(raw)) {
+    return { items: normalizeStoredWorkspace(raw, undefined), reviewed: {} };
+  }
+  if (raw && typeof raw === "object" && Array.isArray((raw as { items?: unknown }).items)) {
+    const obj = raw as { items: unknown; reviewed?: unknown };
+    return { items: normalizeStoredWorkspace(obj.items, undefined), reviewed: normalizeReviewedMap(obj.reviewed) };
+  }
+  return null;
+}
+
+/**
+ * Merges an imported Workspace into the current one — the default, non-destructive
+ * import path (Replace is a separate, explicitly-armed action in the UI). Items
+ * dedupe by `itemKey`; on a genuine conflict (same key on both sides) the NEWER
+ * `timestamp` wins, same "most recent capture is the truth" rule the fold logic
+ * already uses elsewhere. Reviewed marks merge by keeping the LATER `reviewedAt` per
+ * element key — never loses a more-informed review just because it came from the
+ * other side.
+ */
+export function mergeWorkspaceExport(current: ParsedWorkspaceImport, incoming: ParsedWorkspaceImport): ParsedWorkspaceImport {
+  const byKey = new Map<string, WorkspaceItem>();
+  for (const item of current.items) byKey.set(itemKey(item), item);
+  for (const item of incoming.items) {
+    const existing = byKey.get(itemKey(item));
+    if (!existing || item.timestamp >= existing.timestamp) byKey.set(itemKey(item), item);
+  }
+  const reviewed: WorkspaceReviewedMap = { ...current.reviewed };
+  for (const [key, ts] of Object.entries(incoming.reviewed)) {
+    reviewed[key] = Math.max(reviewed[key] ?? 0, ts);
+  }
+  return { items: [...byKey.values()], reviewed };
 }

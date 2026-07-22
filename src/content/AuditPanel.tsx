@@ -145,6 +145,24 @@ export interface AuditPanelProps {
   /** "All fields" (default) badges every matched element on the page, same as classic Translation Mode. "Current only" declutters the page down to just the entry currently selected below — a live workflow toggle, not a persisted setting (ROADMAP.md PHASE 18 §4, DECISIONS.md #61). */
   scope: BadgeScope;
   onScopeChange: (scope: BadgeScope) => void;
+  /**
+   * `"type apiName"` keys of elements already tracked in the Workspace (edited OR
+   * pinned) — `shared/workspace.ts`'s `allElementKeys`, kept live by content/index.tsx
+   * the same way `workspacePinnedKeySet` already is (Workspace v3, `DECISIONS.md
+   * #67`). Purely presentational here: a small dot on matching rows, so "is this
+   * already in my Workspace" is visible without leaving the audit flow. Absent =
+   * no marker rendered (e.g. a context with no Workspace state available).
+   */
+  workspaceElementKeys?: ReadonlySet<string>;
+  /**
+   * Pins every entry in the CURRENT filtered/searched view that isn't already tracked
+   * (Workspace v4, `DECISIONS.md #68`) — the one bulk path from Translate All into the
+   * Workspace. Deliberately not per-row checkboxes: this panel has no selection concept
+   * today and one contextual button over the filter it already has avoids introducing
+   * a second, competing selection paradigm next to the Workspace page's. Absent = no
+   * button rendered.
+   */
+  onAddFilteredToWorkspace?: () => void;
 }
 
 /**
@@ -173,6 +191,8 @@ export function AuditPanel({
   onToggleExpanded,
   scope,
   onScopeChange,
+  workspaceElementKeys,
+  onAddFilteredToWorkspace,
 }: AuditPanelProps) {
   const listRef = useRef<HTMLUListElement | null>(null);
   const activeRowRef = useRef<HTMLButtonElement | null>(null);
@@ -192,6 +212,11 @@ export function AuditPanel({
   const clampedIndex = filtered.length === 0 ? 0 : Math.min(currentIndex, filtered.length - 1);
   const current = filtered[clampedIndex];
   const issueCount = counts.missing + counts.identical;
+  // How many of the CURRENTLY FILTERED rows aren't already tracked — the "Add N to
+  // Workspace" button's own count, and whether it renders at all (Workspace v4, #68).
+  const addableCount = workspaceElementKeys
+    ? filtered.filter((e) => !workspaceElementKeys.has(`${e.entry.type} ${e.entry.apiName}`)).length
+    : 0;
 
   // The internal list follows navigation the same way the page does (DECISIONS.md
   // #62) — keyed on the active entry's identity, not the raw index, so a save that
@@ -307,6 +332,14 @@ export function AuditPanel({
         ))}
       </div>
 
+      {onAddFilteredToWorkspace && addableCount > 0 && (
+        <div className="sti-audit-panel__ws-add">
+          <button type="button" className="sti-audit-ws-add-btn" onClick={onAddFilteredToWorkspace}>
+            + Add {addableCount} to Workspace
+          </button>
+        </div>
+      )}
+
       {filtered.length === 0 ? (
         <div className="sti-audit-panel__empty">
           {search.trim() !== "" || typeFilters.length > 0
@@ -388,6 +421,11 @@ export function AuditPanel({
                     <span className="sti-audit-panel__row-name" title={entry.entry.apiName}>
                       {displayApiName(entry.entry)}
                     </span>
+                    {workspaceElementKeys?.has(`${entry.entry.type} ${entry.entry.apiName}`) && (
+                      <span className="sti-audit-panel__row-ws" title="Tracked in Workspace" aria-hidden="true">
+                        ●
+                      </span>
+                    )}
                     {meta && (
                       <span className="sti-audit-panel__row-meta" style={{ color: STATUS_COLOR[entry.status] }}>
                         {meta}
