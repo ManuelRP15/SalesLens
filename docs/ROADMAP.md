@@ -396,34 +396,71 @@ until the feasibility spike above runs; don't commit to this list in the UI unti
 confirmed.
 
 ### PHASE 16 — Workspace, Metadata Basket & Automatic package.xml Builder
-**🟢 v2 shipped 2026-07-22 (`DECISIONS.md #66`; v1 same week, `#65`).** The Workspace is
-now integrated into the product's flow, not a side utility:
-- **Capture, two paths:** every successful save (v1, automatic) + **"+ Workspace" pins
-  from the inspector tooltip** (v2) — one affordance that serves BOTH discovery
-  workflows, since audit rows open the same inspector ("navigate = inspect", `#62`).
-  Pins snapshot every language value at capture time.
-- **Change awareness:** the page compares captured values against `cachedEntries` and
-  flags "changed since your edit / since you captured it" per language, with an honest
-  "not in the current index" unknown state and a freshness footer. No new API calls.
-- **The page speaks the product's visual language** (`workspace.css`): audit-panel
-  status rails (edited blue / pinned slate / changed amber), tooltip type badges +
-  language dots, search + typeLabel chips + status tabs (All/Edited/Pinned/Changed),
-  Open-in-Setup links (via `lastOrgOrigin` + `setupPath`), relative times, two-stage
-  clear. Popup button shows a live item count.
+**🟢 v4 shipped 2026-07-22 (`DECISIONS.md #68`; v3/v2/v1 same week, `#67`/`#66`/`#65`).**
+The Workspace is the product's work-hub, element-centric rather than edit-row-centric:
+- **The ELEMENT (type + apiName), not the edit row, is the atomic unit** —
+  `ElementCard`s (grouping every edit + pin for one element) replace the old flat,
+  type-grouped rows, each with an expandable per-language **edit History** (v4: real
+  entries going forward, an honest single-entry reconstruction for anything captured
+  before). A secondary **Activity** pill toggle keeps the raw cross-element
+  chronological feed available (re-scoped in v4: History is the per-element lens,
+  Activity is the cross-element one — not redundant with each other).
+- **Capture, two paths, unchanged:** every successful save (automatic) + **"+
+  Workspace" pins from the inspector tooltip**, now also reachable in bulk via
+  Translate All's **"Add filtered to Workspace"** (v4) — one contextual button over
+  the panel's existing filter, not a second selection system. The tooltip's save
+  notice now says "Added" or "Updated" accurately (v4: the background already knows
+  which, `SaveTranslationResponse.workspaceCaptureKind`).
+- **Self-invalidating per-element "reviewed" status** (`workspaceReviewed`,
+  page-owned) — a mark only holds while nothing newer has touched the element and it
+  hasn't drifted; a new edit/pin or org-side drift silently un-reviews it, no manual
+  cleanup needed. Status tabs: All / Needs review / Reviewed / Changed.
+- **Contextual multi-select, fixed at the root in v4** — the checkbox was a native
+  `<input>` fighting its own label-forwarding/activation-behavior; now a plain custom
+  button, one click event, no race. Click/shift-click-range/ctrl-click on element
+  cards, a sticky bulk bar (export selection, mark reviewed/pending, remove) that only
+  appears while something's selected.
+- **Export, scoped (v4):** the primary button is now a small menu (package.xml / a
+  portable Workspace-state file) exporting EVERYTHING; **"Export N filtered"**
+  (toolbar) and **"Export selected"** (bulk bar) are the scoped alternatives, each
+  labeled with exactly what they'd export.
+- **Workspace-state import/export (v4)** — a versioned envelope
+  (`{formatVersion, exportedAt, items, reviewed}`, back-compat with the old bare-array
+  "Export JSON"), merge-by-default (newer timestamp wins per key) or an explicitly
+  two-stage-armed Replace.
+- **Single-level, session-only Undo (v4)** — one snapshot before Remove/bulk-Remove/
+  Clear, a transient banner, no redo, nothing persisted to storage (the delete already
+  committed there; this only restores the one-click convenience). Not the deploy-backed
+  **Safe Undo** below — that's a different, still-unbuilt feature.
+- **Cross-surface indicator:** Translate All's audit rows show a small "tracked in
+  Workspace" dot for elements already captured.
+- **The page still speaks the product's visual language** (`workspace.css`):
+  audit-panel status rails, tooltip type badges + language dots, search + type/kind
+  chips, Open-in-Setup links, relative times, two-stage clear. The popup shows a live
+  element-level summary (elements / needs review / changed) above the "Open Workspace"
+  button — the deliberate v4 answer to "make it feel present," not an in-page drawer.
 
-**Deliberately deferred, with reasons (`#66`):**
+**Deliberately deferred, with reasons (`#66`/`#67`/`#68`):**
 - **Safe Undo** — next in line; a write path (T3) wanting its own round with real-org
-  verification. Its prerequisites (original values + drift detection) now exist.
+  verification: restoring the actual ORG value via a deploy, not the same thing as
+  v4's Workspace-tracking Undo above. Its prerequisites (original values + drift
+  detection) now exist.
 - **"Last modified by" / org audit info** — investigated: reliably available ONLY for
   Custom Labels (Tooling API `ExternalString.LastModifiedBy`); the deploy()-backed
   types are not Tooling-queryable (`DECISIONS.md #6`) and the Metadata API exposes no
   per-node audit. A partial, per-type-availability feature was judged noise for now;
   if built, the UI must distinguish known/unknown/not-available per `#66`.
 - **Named/multiple sessions & session sharing** — evaluated and rejected for now (P2
-  radical simplicity): ONE rolling workspace + timestamps + "since <date>" + JSON
-  export/import covers the real need until evidence of multi-session demand appears.
-- **JSON import** (export ships), **bulk actions/multi-select**, **keyboard nav** on
-  the page — all deferred until a real usage pattern asks for them.
+  radical simplicity): ONE rolling workspace + timestamps + "since <date>" + the v4
+  import/export envelope (a session archive, in effect) covers the observed need.
+- **Keyboard nav** on the page, **any bulk write/translate action** (`#67`/`#68`:
+  every batch action shipped EXCEPT one that writes to Salesforce — batching
+  optimistic-concurrency writes safely is its own T3-sized scope), **cross-tab "jump
+  back to this element on the page"** (`#67`: Setup deep links already solve "return
+  to context"; live cross-tab DOM targeting has no existing pattern to build on),
+  **redo** (`#68`: single-level Undo already covers the realistic "oops" case; a
+  command stack is real complexity with no demonstrated need yet) — all deferred until
+  a real usage pattern asks for them.
 
 Original phase spec kept below for those follow-ups.
 

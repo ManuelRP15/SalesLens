@@ -7,7 +7,7 @@ import { AuditPanel, filterAuditEntries, type AuditFilter } from "./AuditPanel";
 import auditPanelCss from "./audit-panel.css?inline";
 import { normalizeBareKey } from "../shared/hotkeys";
 import { resolveEscape, resolveNavKey, resolveOutsideClick, type InteractionSnapshot, type NavAction } from "./interaction";
-import { normalizeStoredWorkspace, pinnedKeys } from "../shared/workspace";
+import { allElementKeys, normalizeStoredWorkspace, pinnedKeys } from "../shared/workspace";
 import type {
   LabelEntry,
   ResolveTextResponse,
@@ -553,8 +553,26 @@ function renderAuditPanel() {
       onToggleExpanded={handleAuditToggleExpanded}
       scope={auditScope}
       onScopeChange={handleAuditScopeChange}
+      workspaceElementKeys={workspaceElementKeySet}
+      onAddFilteredToWorkspace={handleAddFilteredToWorkspace}
     />
   );
+}
+
+/**
+ * "Add filtered to Workspace" (Workspace v4, `DECISIONS.md #68`) — pins every entry in
+ * the CURRENT filtered/searched audit view that isn't already tracked (pinned OR
+ * edited). Loops the existing single-element `toggleWorkspacePin` rather than adding a
+ * new background message: raw-looping the toggle over ALREADY-pinned entries would
+ * incorrectly unpin them, so the not-yet-tracked filter (against the same
+ * `workspaceElementKeySet` the panel's own count/dot use, so the button never promises
+ * a number it doesn't deliver) has to happen here regardless.
+ */
+function handleAddFilteredToWorkspace() {
+  const targets = currentFilteredAuditEntries().filter(
+    (e) => !workspaceElementKeySet.has(`${e.entry.type} ${e.entry.apiName}`)
+  );
+  void Promise.all(targets.map((e) => toggleWorkspacePin(e.entry)));
 }
 
 function handleAuditUpdate(entries: AuditEntry[]) {
@@ -848,8 +866,19 @@ chrome.storage.local.get("settings", (stored) => {
  */
 let workspacePinnedKeySet: ReadonlySet<string> = new Set();
 
+/**
+ * Every element (pinned OR edited) currently tracked in the Workspace — the audit
+ * panel's "tracked in Workspace" marker (Workspace v3, `DECISIONS.md #67`). Same
+ * loading/refresh discipline as `workspacePinnedKeySet` above, but since the audit
+ * panel (unlike the tooltip) is a persistently-mounted surface, a change also
+ * re-renders it — see the storage listener below.
+ */
+let workspaceElementKeySet: ReadonlySet<string> = new Set();
+
 chrome.storage.local.get(["workspaceItems", "workspaceEdits"], (stored) => {
-  workspacePinnedKeySet = pinnedKeys(normalizeStoredWorkspace(stored.workspaceItems, stored.workspaceEdits));
+  const items = normalizeStoredWorkspace(stored.workspaceItems, stored.workspaceEdits);
+  workspacePinnedKeySet = pinnedKeys(items);
+  workspaceElementKeySet = allElementKeys(items);
 });
 
 function toggleWorkspacePin(entry: LabelEntry): Promise<boolean> {
@@ -864,7 +893,13 @@ function toggleWorkspacePin(entry: LabelEntry): Promise<boolean> {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes.workspaceItems) {
-    workspacePinnedKeySet = pinnedKeys(normalizeStoredWorkspace(changes.workspaceItems.newValue, undefined));
+    const items = normalizeStoredWorkspace(changes.workspaceItems.newValue, undefined);
+    workspacePinnedKeySet = pinnedKeys(items);
+    workspaceElementKeySet = allElementKeys(items);
+    // The audit panel, unlike the tooltip, stays mounted across renders — refresh it
+    // only if it's already on screen (auditRoot exists), so this never mounts it
+    // prematurely on a page where Translate All was never engaged.
+    if (auditRoot) renderAuditPanel();
   }
   if (!changes.settings) return;
   const s = changes.settings.newValue as Settings | undefined;

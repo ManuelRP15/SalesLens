@@ -286,3 +286,16 @@
   padding: 3px 6px;
   margin-bottom: 5px;
 }
+
+/* Transient, neutral confirmation after a successful save (Workspace v3,
+   DECISIONS.md #67) — same slot/timing as .sti-conflict-notice, calm styling instead
+   of the warning tone since nothing went wrong. */
+.sti-save-notice {
+  font-size: 10.5px;
+  color: #0765ac;
+  background: #eef6fd;
+  border: 1px solid #cfe6fa;
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin-bottom: 5px;
+}

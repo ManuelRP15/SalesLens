@@ -175,6 +175,13 @@ export interface SaveTranslationResponse {
    */
   conflict?: boolean;
   currentValue?: string;
+  /**
+   * Present on a successful save — whether this element already had a Workspace
+   * presence (any edit or pin) BEFORE this save, computed in the background right
+   * before folding the new edit in (Workspace v4, `DECISIONS.md #68`). Lets the
+   * tooltip say "Added" vs. "Updated" accurately instead of always claiming "Added."
+   */
+  workspaceCaptureKind?: "added" | "updated";
 }
 
 export interface ContextHints {
@@ -330,6 +337,32 @@ export interface WorkspaceEdit {
   newValue: string;
   /** Epoch ms of the LATEST save of this key. */
   timestamp: number;
+  /**
+   * How many times this (type, apiName, language) key has been folded — 1 on first
+   * capture, +1 per repeat save. Undefined on rows captured before this field existed;
+   * every reader treats undefined as 1 rather than migrating storage (Workspace v3,
+   * `DECISIONS.md #67`). Surfaces the "edited more than once" signal the element card
+   * needs without keeping a full edit history.
+   */
+  editCount?: number;
+  /**
+   * Every fold of this key, oldest first — the real edit history (Workspace v4,
+   * `DECISIONS.md #68`). Each entry is exactly the `(oldValue, newValue, timestamp)`
+   * triple that save's request already carried (the optimistic-concurrency baseline
+   * `background/index.ts` re-verified against the live org), appended, never rewritten
+   * — nothing here is reconstructed or guessed. Absent on rows captured before this
+   * field existed; `shared/workspace.ts`'s `historyOf()` synthesizes a single
+   * best-effort entry for those from the top-level fields instead of migrating
+   * storage, and says so is honest about it being partial.
+   */
+  history?: WorkspaceHistoryEntry[];
+}
+
+/** One entry in a `WorkspaceEdit`'s `history` — see `WorkspaceEdit.history`. */
+export interface WorkspaceHistoryEntry {
+  timestamp: number;
+  oldValue: string;
+  newValue: string;
 }
 
 /**
@@ -355,6 +388,17 @@ export interface WorkspacePin {
  * `workspaceEdits`; `shared/workspace.ts`'s `normalizeStoredWorkspace` migrates them.)
  */
 export type WorkspaceItem = WorkspaceEdit | WorkspacePin;
+
+/**
+ * Per-element "reviewed" state (Workspace v3, `DECISIONS.md #67`), persisted under
+ * `chrome.storage.local`'s `workspaceReviewed` key. Keyed by `elementKey(type,
+ * apiName)` (`shared/workspace.ts`), value = epoch ms the user marked it reviewed.
+ * Owned entirely by the Workspace page — the background never reads or writes this.
+ * A reviewed entry is only trusted while it's newer than the element's latest
+ * activity AND the element shows no drift (`isReviewedFresh`); otherwise it's treated
+ * as stale without anything having to actively delete it.
+ */
+export type WorkspaceReviewedMap = Record<string, number>;
 
 /** Content → background: toggle an element's Workspace pin (tooltip's "Add to Workspace"). The background snapshots the entry's current values from its own index — the authoritative copy — not from the page. */
 export interface ToggleWorkspacePinRequest {

@@ -3,7 +3,7 @@ import { MOCK_LABEL_ENTRIES } from "../shared/mock-data";
 import { fetchAllTranslations, saveCustomLabelTranslation, toApiHost } from "../shared/salesforce-api";
 import { fetchMetadataTranslationEntries } from "../shared/metadata-translations";
 import { saveMetadataTranslation } from "../shared/metadata-write";
-import { normalizeStoredWorkspace, recordEdit, togglePin } from "../shared/workspace";
+import { elementKey, normalizeStoredWorkspace, recordEdit, togglePin } from "../shared/workspace";
 import { isEditableEntry, isInSimpleScope } from "../shared/types";
 import type {
   ResolveTextRequest,
@@ -223,8 +223,9 @@ async function saveTranslation(req: SaveTranslationRequest): Promise<SaveTransla
     // verified against the live org — exactly the "before" the comparator (and a
     // future Safe Undo) needs. Capture must never break the save it records (the
     // write already happened), so failures only log.
+    let workspaceCaptureKind: SaveTranslationResponse["workspaceCaptureKind"];
     try {
-      await recordWorkspaceEdit({
+      const { wasNew } = await recordWorkspaceEdit({
         kind: "edit",
         type: req.labelType,
         apiName: req.apiName,
@@ -233,11 +234,12 @@ async function saveTranslation(req: SaveTranslationRequest): Promise<SaveTransla
         newValue: req.value,
         timestamp: Date.now(),
       });
+      workspaceCaptureKind = wasNew ? "added" : "updated";
     } catch (err) {
       console.warn("[STI] workspace capture failed:", err);
     }
 
-    return { ok: true, entry };
+    return { ok: true, entry, workspaceCaptureKind };
   } catch (err) {
     console.warn("[STI] saveTranslation error:", err);
     return { ok: false, error: err instanceof Error ? err.message : "Save failed." };
@@ -261,9 +263,19 @@ async function storeWorkspaceItems(items: WorkspaceItem[]): Promise<void> {
   await chrome.storage.local.remove("workspaceEdits");
 }
 
-/** PHASE 16: folds one captured edit into the persisted Workspace (fold rule: shared/workspace.ts's recordEdit). */
-async function recordWorkspaceEdit(edit: WorkspaceEdit): Promise<void> {
-  await storeWorkspaceItems(recordEdit(await loadWorkspaceItems(), edit));
+/**
+ * PHASE 16: folds one captured edit into the persisted Workspace (fold rule:
+ * shared/workspace.ts's recordEdit). Returns whether the element (any edit or pin,
+ * not just this exact language) already had a Workspace presence BEFORE this fold —
+ * Workspace v4's (`DECISIONS.md #68`) "Added" vs. "Updated" capture message needs to
+ * know this, and this is the one place that already loads the Workspace to check.
+ */
+async function recordWorkspaceEdit(edit: WorkspaceEdit): Promise<{ wasNew: boolean }> {
+  const existing = await loadWorkspaceItems();
+  const key = elementKey(edit.type, edit.apiName);
+  const wasNew = !existing.some((i) => elementKey(i.type, i.apiName) === key);
+  await storeWorkspaceItems(recordEdit(existing, edit));
+  return { wasNew };
 }
 
 /**

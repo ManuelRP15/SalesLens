@@ -1,9 +1,9 @@
-/* Workspace page (PHASE 16 v2, DECISIONS.md #66).
+/* Workspace page (PHASE 16 v2/v3, DECISIONS.md #66/#67).
    Deliberately speaks the SAME visual language as the in-page surfaces: the audit
    panel's status rails and chip filters, the tooltip's type badges and language dots.
    Color vocabulary (shared with audit-panel.css / tooltip-constants.ts):
    brand blue #0176d3 · edited rail #0176d3 · changed-externally rail/tone #b8860b ·
-   pinned rail #94a3b8 · ok green #1a7f4e · danger #ba0517 · ink #16325c ·
+   pinned rail #94a3b8 · reviewed/ok green #1a7f4e · danger #ba0517 · ink #16325c ·
    muted #706e6b · borders #d8dde6 / #eef1f6. */
 
 .ws-page {
@@ -81,9 +81,84 @@
   color: #fff;
 }
 
-/* ── Summary strip ──────────────────────────────────────────────────────── */
+.ws-btn--small {
+  font-size: 12px;
+  padding: 4px 10px;
+}
 
-.ws-summary {
+/* ── Export menu (Workspace v4, DECISIONS.md #68) ────────────────────────
+   One primary button, a small menu instead of a permanent second button —
+   "Export current view"/"Export selected" are the contextual alternatives. */
+.ws-export-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.ws-export-menu__dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #d8dde6;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(22, 50, 92, 0.15);
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+}
+
+.ws-export-menu__item {
+  font-family: inherit;
+  text-align: left;
+  font-size: 13px;
+  color: #16325c;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 7px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ws-export-menu__item:hover {
+  background: #f4f6f9;
+}
+
+.ws-export-menu__hint {
+  font-size: 11px;
+  color: #706e6b;
+  font-weight: 400;
+}
+
+/* ── Import banners ───────────────────────────────────────────────────── */
+
+.ws-import-banner {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+  color: #16325c;
+  background: #eef6fd;
+  border: 1px solid #cfe6fa;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+.ws-import-banner--error {
+  background: #fdf2f3;
+  border-color: #f3c6cb;
+  color: #7a1120;
+}
+
+/* ── Overview strip: "what am I working on" at a glance ─────────────────── */
+
+.ws-overview {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -93,9 +168,41 @@
   color: #706e6b;
 }
 
-.ws-summary strong {
+.ws-overview strong {
   color: #16325c;
   font-weight: 600;
+}
+
+.ws-overview__stat strong {
+  color: #16325c;
+}
+
+.ws-view-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  background: #f4f6f9;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.ws-view-toggle__btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #706e6b;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ws-view-toggle__btn--active {
+  background: #fff;
+  color: #16325c;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(22, 50, 92, 0.12);
 }
 
 .ws-lang {
@@ -174,6 +281,19 @@
   background: #f4f6f9;
 }
 
+.ws-chip--active {
+  background: #eef3fd;
+  color: #1a56db;
+  border-color: #1a56db;
+}
+
+.ws-toolbar__sep {
+  width: 1px;
+  align-self: stretch;
+  background: #eef1f6;
+  margin: 0 2px;
+}
+
 .ws-tabs {
   display: flex;
   gap: 2px;
@@ -246,9 +366,218 @@
   gap: 6px;
 }
 
+/* Activity is a cross-element lens, History (inside a card) is a per-element one —
+   this line states that distinction instead of leaving it to be assumed (#68). */
+.ws-activity-hint {
+  font-size: 12px;
+  color: #9aa0a6;
+  padding-bottom: 2px;
+}
+
+/* ── Element cards — the primary unit (Workspace v3, DECISIONS.md #67) ──── */
+
+.ws-cards {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+/* Same status-rail convention as the old flat rows, now on the ELEMENT: neutral by
+   default, reviewed = green, changed = amber (drift wins — it needs attention even
+   over a stale reviewed mark, which isReviewedFresh already guarantees can't happen). */
+.ws-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px 9px 10px;
+  background: #fff;
+  border: 1px solid #eef1f6;
+  border-left: 3px solid #0176d3;
+  border-radius: 6px;
+  cursor: default;
+}
+
+.ws-card--reviewed {
+  border-left-color: #1a7f4e;
+  background: #f7fbf9;
+}
+
+.ws-card--changed {
+  border-left-color: #b8860b;
+  background: #fffdf7;
+}
+
+.ws-card--selected {
+  outline: 2px solid #0176d3;
+  outline-offset: -1px;
+}
+
+/* A plain button styled as a checkbox (Workspace v4, DECISIONS.md #68) — deliberately
+   NOT a native <input type="checkbox">: a single click event with no label-forwarding
+   or activation-behavior race gave the selection model a real correctness bug (see
+   #68). One element, one event, shiftKey/ctrlKey read straight off it. */
+.ws-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  padding: 0;
+  border: 1.5px solid #c9d0dc;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.ws-checkbox:hover {
+  border-color: #0176d3;
+}
+
+.ws-checkbox--checked {
+  background: #0176d3;
+  border-color: #0176d3;
+}
+
+.ws-checkbox__mark {
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ws-card__main {
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+
+.ws-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ws-card__summary {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #706e6b;
+  overflow-wrap: anywhere;
+}
+
+.ws-card__detail {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+/* Per-language edit history (Workspace v4, DECISIONS.md #68) — a self-contained
+   disclosure inside the expanded card, invisible entirely when there's nothing to
+   show (a single edit, the common case pays zero visual cost). */
+.ws-history {
+  margin: 2px 0 4px 20px;
+}
+
+.ws-history__toggle {
+  font-family: inherit;
+  font-size: 11px;
+  color: #706e6b;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.ws-history__toggle:hover {
+  color: #0176d3;
+}
+
+.ws-history__list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+}
+
+.ws-history__entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #706e6b;
+  overflow-wrap: anywhere;
+}
+
+.ws-history__index {
+  color: #9aa0a6;
+  min-width: 14px;
+}
+
+.ws-history__time {
+  font-variant-numeric: tabular-nums;
+  color: #9aa0a6;
+  white-space: nowrap;
+}
+
+.ws-history__more {
+  font-size: 11px;
+  color: #9aa0a6;
+  font-style: italic;
+  padding-left: 20px;
+}
+
+.ws-snapshot-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 10px;
+  font-size: 12px;
+}
+
+.ws-kind--edit {
+  color: #0765ac;
+}
+
+.ws-kind--pin {
+  color: #64748b;
+}
+
+.ws-kind--reviewed {
+  color: #1a7f4e;
+  font-weight: 600;
+}
+
+.ws-reviewed-btn {
+  font-family: inherit;
+  font-size: 11px;
+  color: #706e6b;
+  background: #fff;
+  border: 1px solid #d8dde6;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ws-reviewed-btn:hover {
+  border-color: #1a7f4e;
+  color: #1a7f4e;
+}
+
+.ws-reviewed-btn--on {
+  background: #eaf6ef;
+  border-color: #1a7f4e;
+  color: #1a7f4e;
+}
+
 /* Status rail on the left edge — the audit panel's own convention:
    edited = brand blue, pinned = quiet slate, changed-externally = amber (drift wins,
-   it's the state that needs the user's attention). */
+   it's the state that needs the user's attention). Used by the Activity view's flat
+   per-item rows. */
 .ws-row {
   display: flex;
   align-items: flex-start;
@@ -405,6 +734,57 @@
 .ws-remove:hover {
   color: #ba0517;
   border-color: #ba0517;
+}
+
+/* ── Contextual bulk-selection bar ────────────────────────────────────────
+   Appears only while something is selected — a temporary mode, not a permanent
+   fixture of the page (brief: "selecciono → aparece → actúo → vuelvo al flujo"). */
+
+.ws-bulkbar {
+  position: sticky;
+  bottom: 16px;
+  margin: 20px auto 0;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #16325c;
+  color: #fff;
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(22, 50, 92, 0.35);
+  flex-wrap: wrap;
+}
+
+.ws-bulkbar__count {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 8px 0 4px;
+  white-space: nowrap;
+}
+
+.ws-bulkbar .ws-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.ws-bulkbar .ws-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.ws-bulkbar .ws-btn--danger {
+  color: #ffb4bd;
+}
+
+.ws-bulkbar .ws-btn--danger:hover {
+  background: #ba0517;
+  color: #fff;
+}
+
+.ws-bulkbar__clear {
+  opacity: 0.75;
 }
 
 /* ── Empty / footer states ──────────────────────────────────────────────── */

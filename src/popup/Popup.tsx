@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { langAccent } from "../content/tooltip-constants";
 import { bareKeysConflict, pickAvailableBareKey } from "../shared/hotkeys";
-import { normalizeStoredWorkspace } from "../shared/workspace";
-import { DEFAULT_HOLD_HOTKEY, DEFAULT_INSPECTOR_HOTKEY, DEFAULT_TM_HOTKEY, type Settings, type TmPreset } from "../shared/types";
+import { elementKey, normalizeReviewedMap, normalizeStoredWorkspace, workspaceOverviewCounts, type WorkspaceOverviewCounts } from "../shared/workspace";
+import {
+  DEFAULT_HOLD_HOTKEY,
+  DEFAULT_INSPECTOR_HOTKEY,
+  DEFAULT_TM_HOTKEY,
+  type LabelEntry,
+  type Settings,
+  type TmPreset,
+} from "../shared/types";
 
 // NOTE: no flag emoji anywhere — Chrome on Windows renders 🇪🇸 as the letters
 // "ES". The language marker is the same colored dot used by the tooltip and
@@ -208,25 +215,34 @@ export function Popup() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showTmSettings, setShowTmSettings] = useState(false);
-  // Live Workspace item count on the "Open Workspace" button — the popup is where the
-  // Workspace is reached from, so it says at a glance whether there's anything in it.
-  const [workspaceCount, setWorkspaceCount] = useState(0);
+  // Live Workspace summary on the "Open Workspace" button (Workspace v4, DECISIONS.md
+  // #68) — the popup is the one surface that's always one click away with zero
+  // footprint on the page, so it's where "is my work here in good shape" belongs
+  // rather than a permanent in-page drawer. Mirrors the same element-level counts the
+  // Workspace page itself shows, via the shared `workspaceOverviewCounts`.
+  const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceOverviewCounts>({
+    elementCount: 0,
+    needsReviewCount: 0,
+    changedCount: 0,
+  });
 
   useEffect(() => {
     chrome.runtime.sendMessage({ type: "GET_SETTINGS" }, (response: Settings) => {
       setSettings(response);
     });
-    const readCount = (itemsRaw: unknown, legacyRaw: unknown) =>
-      setWorkspaceCount(normalizeStoredWorkspace(itemsRaw, legacyRaw).length);
-    chrome.storage.local.get(["workspaceItems", "workspaceEdits"], (stored) =>
-      readCount(stored.workspaceItems, stored.workspaceEdits)
-    );
+    const keys = ["workspaceItems", "workspaceEdits", "workspaceReviewed", "cachedEntries"];
+    const readSummary = () => {
+      chrome.storage.local.get(keys, (stored) => {
+        const items = normalizeStoredWorkspace(stored.workspaceItems, stored.workspaceEdits);
+        const reviewed = normalizeReviewedMap(stored.workspaceReviewed);
+        const entries = (stored.cachedEntries as LabelEntry[] | undefined) ?? [];
+        const entriesByKey = new Map(entries.map((e) => [elementKey(e.type, e.apiName), e]));
+        setWorkspaceSummary(workspaceOverviewCounts(items, reviewed, entriesByKey));
+      });
+    };
+    readSummary();
     const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
-      if (area === "local" && (changes.workspaceItems || changes.workspaceEdits)) {
-        chrome.storage.local.get(["workspaceItems", "workspaceEdits"], (stored) =>
-          readCount(stored.workspaceItems, stored.workspaceEdits)
-        );
-      }
+      if (area === "local" && keys.some((k) => k in changes)) readSummary();
     };
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);
@@ -557,10 +573,24 @@ export function Popup() {
           : "Index not built yet"}
       </div>
 
+      {workspaceSummary.elementCount > 0 && (
+        <div style={{ marginTop: 10, fontSize: 11.5, color: "#706e6b", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span>
+            <strong style={{ color: "#16325c" }}>{workspaceSummary.elementCount}</strong> element
+            {workspaceSummary.elementCount === 1 ? "" : "s"}
+          </span>
+          {workspaceSummary.needsReviewCount > 0 && (
+            <span>
+              <strong style={{ color: "#16325c" }}>{workspaceSummary.needsReviewCount}</strong> needs review
+            </span>
+          )}
+          {workspaceSummary.changedCount > 0 && <span style={{ color: "#7a5a08" }}>⚠ {workspaceSummary.changedCount} changed</span>}
+        </div>
+      )}
       <button
         onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("src/workspace/index.html") })}
         style={{
-          marginTop: 10,
+          marginTop: workspaceSummary.elementCount > 0 ? 4 : 10,
           width: "100%",
           padding: "6px 0",
           fontSize: 13,
@@ -570,7 +600,7 @@ export function Popup() {
           cursor: "pointer",
         }}
       >
-        Open Workspace{workspaceCount > 0 ? ` (${workspaceCount})` : ""}
+        Open Workspace{workspaceSummary.elementCount > 0 ? ` (${workspaceSummary.elementCount})` : ""}
       </button>
     </div>
   );
