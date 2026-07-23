@@ -4,7 +4,7 @@ Last updated: July 2026
 
 This Privacy Policy explains how Salesforce Translation Toolkit (the “Extension”) handles information when you use the browser extension.
 
-The Extension is developed and published by manue.
+The Extension is developed and published by Manuel Roldán.
 
 1. Purpose of the Extension
 
